@@ -1,6 +1,11 @@
 # CLLM2
+1. How to to generate trajectory now?
+```
+cd /data/phd/kousiqi/kousiqi/CLLM2
+bash scripts/generate_trajectory.sh
+```
 
-3. How to train cllm2 now?  
+2. How to train cllm2 now?  
 ```
 conda activate /data/phd/kousiqi/kousiqi/envs/cllm2
 cd /data/phd/kousiqi/kousiqi/CLLM2
