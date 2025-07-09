@@ -202,7 +202,7 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len, use_aug, 
         iteration_steps_list = []
 
         while itr * n_token_seq_len < max_new_seq_len and not eos_reached:
-
+        
             dic = {}
             dic['data_id'] = f'data_{i}'
             dic['diffusion_itr_id'] = f'itr_{itr}'
@@ -220,7 +220,8 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len, use_aug, 
                 filter_thres=0.9,
                 temperature = 1.,
                 lenience = 1.
-                )
+            )
+            
             iteration_steps_list.append(iteration_steps)
 
             dic["answer_trajectory_ids"] = [

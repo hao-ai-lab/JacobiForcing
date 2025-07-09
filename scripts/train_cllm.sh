@@ -1,14 +1,15 @@
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-export WANDB_PROJECT=cllm2_distillation
+export WANDB_PROJECT=cllm2_training
 
-model_path="/data/phd/kousiqi/kousiqi/ckpts/OpenThinker2-7B"
-trajectory_file="data/collected_diffusion_trajectory/merged_output.json"
-output_path="/data/phd/kousiqi/kousiqi/ckpts/cllm-openthinker2-7B"
-n_token_seq_size=64
+model_path="/checkpoint/lhu/models/OpenThinker2-7B"
+trajectory_file="/checkpoint/lhu/data/CLLM2_openthought/train_openthoughts_chunk_0_formatted.json"
+output_path="/checkpoint/lhu/train_ckpts/cllm/cllm-openthinker2-7B-ntok32"
+n_token_seq_size=32
 qlora=False
 
-torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 --rdzv_endpoint='localhost:5666' \
-    --master_port 10001 \
+torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 \
+    --rdzv_endpoint='localhost:5666' \
+    --master_port 10000 \
     train/train_cllm.py \
     --target_model_path ${model_path} \
     --data_path ${trajectory_file} \

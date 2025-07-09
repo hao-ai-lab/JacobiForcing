@@ -1,0 +1,54 @@
+  0%|                                                                                                                           | 0/4092 [00:00<?, ?it/s]Traceback (most recent call last):
+Jacobian prompt ids shape: torch.Size([])
+answer ids shape: torch.Size([32])
+  File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 310, in <module>
+    train()
+  File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 302, in train
+    trainer.train()
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/transformers/trainer.py", line 2207, in train
+    return inner_training_loop(
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/transformers/trainer.py", line 2503, in _inner_training_loop
+    batch_samples, num_items_in_batch = self.get_batch_samples(epoch_iterator, num_batches, args.device)
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/transformers/trainer.py", line 5301, in get_batch_samples
+    batch_samples.append(next(epoch_iterator))
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/accelerate/data_loader.py", line 567, in __iter__
+    current_batch = next(dataloader_iter)
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 733, in __next__
+    data = self._next_data()
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 789, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 165, in __getitem__
+    ret = preprocess_distill_data(self.raw_data[i]["prompt_ids"],
+  File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 122, in preprocess_distill_data
+    jacobian_trajectory_ids.append(trajectory_ids)
+UnboundLocalError: local variable 'trajectory_ids' referenced before assignment
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 310, in <module>
+[rank0]:     train()
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 302, in train
+[rank0]:     trainer.train()
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/transformers/trainer.py", line 2207, in train
+[rank0]:     return inner_training_loop(
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/transformers/trainer.py", line 2503, in _inner_training_loop
+[rank0]:     batch_samples, num_items_in_batch = self.get_batch_samples(epoch_iterator, num_batches, args.device)
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/transformers/trainer.py", line 5301, in get_batch_samples
+[rank0]:     batch_samples.append(next(epoch_iterator))
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/accelerate/data_loader.py", line 567, in __iter__
+[rank0]:     current_batch = next(dataloader_iter)
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 733, in __next__
+[rank0]:     data = self._next_data()
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 789, in _next_data
+[rank0]:     data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+[rank0]:     data = [self.dataset[idx] for idx in possibly_batched_index]
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/cllm2/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in <listcomp>
+[rank0]:     data = [self.dataset[idx] for idx in possibly_batched_index]
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 165, in __getitem__
+[rank0]:     ret = preprocess_distill_data(self.raw_data[i]["prompt_ids"],
+[rank0]:   File "/code/users/lhu/workspace/CLLM2/train/train_cllm.py", line 122, in preprocess_distill_data
+[rank0]:     jacobian_trajectory_ids.append(trajectory_ids)
+[rank0]: UnboundLocalError: local variable 'trajectory_ids' referenced before assignment

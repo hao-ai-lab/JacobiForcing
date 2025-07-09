@@ -1,0 +1,15 @@
+2025-07-08 09:14:42,511 INFO    MainThread:19151 [wandb_setup.py:_flush():80] Current SDK version is 0.21.0
+2025-07-08 09:14:42,512 INFO    MainThread:19151 [wandb_setup.py:_flush():80] Configure stats pid to 19151
+2025-07-08 09:14:42,512 INFO    MainThread:19151 [wandb_setup.py:_flush():80] Loading settings from /home/yak/.config/wandb/settings
+2025-07-08 09:14:42,512 INFO    MainThread:19151 [wandb_setup.py:_flush():80] Loading settings from /code/users/lhu/workspace/CLLM2/wandb/settings
+2025-07-08 09:14:42,512 INFO    MainThread:19151 [wandb_setup.py:_flush():80] Loading settings from environment variables
+2025-07-08 09:14:42,512 INFO    MainThread:19151 [wandb_init.py:setup_run_log_directory():703] Logging user logs to /code/users/lhu/workspace/CLLM2/wandb/run-20250708_091442-g5l5fxdn/logs/debug.log
+2025-07-08 09:14:42,513 INFO    MainThread:19151 [wandb_init.py:setup_run_log_directory():704] Logging internal logs to /code/users/lhu/workspace/CLLM2/wandb/run-20250708_091442-g5l5fxdn/logs/debug-internal.log
+2025-07-08 09:14:42,513 INFO    MainThread:19151 [wandb_init.py:init():830] calling init triggers
+2025-07-08 09:14:42,513 INFO    MainThread:19151 [wandb_init.py:init():835] wandb.init called with sweep_config: {}
+config: {'_wandb': {}}
+2025-07-08 09:14:42,513 INFO    MainThread:19151 [wandb_init.py:init():871] starting backend
+2025-07-08 09:14:42,825 INFO    MainThread:19151 [wandb_init.py:init():874] sending inform_init request
+2025-07-08 09:14:42,858 INFO    MainThread:19151 [wandb_init.py:init():882] backend started and connected
+2025-07-08 09:14:42,859 INFO    MainThread:19151 [wandb_init.py:init():953] updated telemetry
+2025-07-08 09:14:42,993 INFO    MainThread:19151 [wandb_init.py:init():977] communicating run to backend with 90.0 second timeout

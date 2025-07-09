@@ -107,16 +107,19 @@ def preprocess_distill_data(
     jacobian_trajectory_ids = []
     # only take batch size 1 for now
     # TODO: support bsz > 1 from the generation script. for now, only prompt ids is in (bsz, seq_len)
-    jacobian_prompt_ids = torch.tensor(prompt_ids[0], dtype=torch.int64)
+    jacobian_prompt_ids = torch.tensor(prompt_ids, dtype=torch.int64)
     teacher_output_ids = torch.tensor(teacher_output_ids, dtype=torch.int64)
     for answer_ids in answer_trajectory_ids:
         answer_ids = torch.tensor(answer_ids, dtype=torch.int64)
+
         if len(jacobian_prompt_ids.shape) == len(answer_ids.shape):
             trajectory_ids = torch.cat((jacobian_prompt_ids, answer_ids), dim=-1)
         elif len(jacobian_prompt_ids.shape) > len(answer_ids.shape):
             trajectory_ids = torch.cat((jacobian_prompt_ids[0], answer_ids), dim=-1)
+        else:
+            raise 
         jacobian_trajectory_ids.append(trajectory_ids)
-   
+
     if labels_ids:
         return dict(
             jacobian_trajectory=jacobian_trajectory_ids,
@@ -156,18 +159,21 @@ class JacobianDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
         if 'labels_ids' in self.raw_data[i].keys():
-            ret = preprocess_distill_data(self.raw_data[i]["prompt_ids"],
-                         self.raw_data[i]["answer_trajectory_ids"],
-                         self.raw_data[i]["teacher_output_ids"],
-                         self.tokenizer,
-                         self.model,
-                         labels_ids=self.raw_data[i]["labels_ids"])
+            ret = preprocess_distill_data(
+                        self.raw_data[i]["prompt_ids"],
+                        self.raw_data[i]["answer_trajectory_ids"],
+                        self.raw_data[i]["teacher_output_ids"],
+                        self.tokenizer,
+                        self.model,
+                        labels_ids=self.raw_data[i]["labels_ids"])
         else:
-            ret = preprocess_distill_data(self.raw_data[i]["prompt_ids"],
-                         self.raw_data[i]["answer_trajectory_ids"],
-                         self.raw_data[i]["teacher_output_ids"],
-                         self.tokenizer,
-                         self.model)
+            ret = preprocess_distill_data(
+                        self.raw_data[i]["prompt_ids"],
+                        self.raw_data[i]["answer_trajectory_ids"],
+                        self.raw_data[i]["teacher_output_ids"],
+                        self.tokenizer,
+                        self.model)
+        
         self.cached_data_dict[i] = ret
 
         return ret

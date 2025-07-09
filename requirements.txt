@@ -13,7 +13,6 @@ deepspeed==0.17.1
 dill==0.3.8
 einops==0.8.1
 filelock==3.18.0
-flash_attn==2.8.0.post2
 frozenlist==1.7.0
 fsspec==2025.3.0
 gitdb==4.0.12
@@ -29,9 +28,8 @@ mpmath==1.3.0
 msgpack==1.1.1
 multidict==6.6.2
 multiprocess==0.70.16
-networkx==3.5
 ninja==1.11.1.4
-numpy==2.3.1
+numpy
 nvidia-cublas-cu12==12.6.4.1
 nvidia-cuda-cupti-cu12==12.6.80
 nvidia-cuda-nvrtc-cu12==12.6.77
