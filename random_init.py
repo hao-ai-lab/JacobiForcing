@@ -1,6 +1,7 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from einops import rearrange
+from torch import nn
 import torch.nn.functional as F
 import torch
 import random
@@ -12,27 +13,36 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
+# logits processors
+from transformers.generation.logits_process import (
+    LogitsProcessorList,
+    RepetitionPenaltyLogitsProcessor,
+    TemperatureLogitsWarper,
+    TopKLogitsWarper,
+    TopPLogitsWarper,
+)
+
 # sampling helpers
-def log(t, eps = 1e-20):
-    return torch.log(t.clamp(min = eps))
+# def log(t, eps = 1e-20):
+#     return torch.log(t.clamp(min = eps))
 
-def gumbel_sample(logits, temperature=1.0, dim=-1):
-    # Replace -inf with very negative number to avoid NaN
-    safe_logits = logits.clone()
-    safe_logits[torch.isinf(safe_logits)] = -1e9
+# def gumbel_sample(logits, temperature=1.0, dim=-1):
+#     # Replace -inf with very negative number to avoid NaN
+#     safe_logits = logits.clone()
+#     safe_logits[torch.isinf(safe_logits)] = -1e9
 
-    noise = -torch.log(-torch.log(torch.rand_like(safe_logits)))
-    return ((safe_logits / max(temperature, 1e-10)) + noise).argmax(dim=dim)
+#     noise = -torch.log(-torch.log(torch.rand_like(safe_logits)))
+#     return ((safe_logits / max(temperature, 1e-10)) + noise).argmax(dim=dim)
 
-def top_k(logits, thres = 0.9):
-    k = math.ceil((1 - thres) * logits.shape[-1])
-    val, ind = torch.topk(logits, k)
-    probs = torch.full_like(logits, float('-inf'))
-    probs.scatter_(-1, ind, val)
-    return probs
+# def top_k(logits, thres = 0.95):
+#     k = math.ceil((1 - thres) * logits.shape[-1])
+#     val, ind = torch.topk(logits, k)
+#     probs = torch.full_like(logits, float('-inf'))
+#     probs.scatter_(-1, ind, val)
+#     return probs
 
-def safe_div(num, den, eps = 1e-10):
-    return num / max(den, eps)
+# def safe_div(num, den, eps = 1e-10):
+#     return num / max(den, eps)
 
 def find_first_true_index(bool_tensor, dim = -1):
     return (bool_tensor.cumsum(dim = dim) == 0).sum(dim = dim)
@@ -45,9 +55,12 @@ def diffusion_decoding(
     input_ids,
     attention_mask,
     n_token_seq_len,
-    filter_thres=0.9,
-    temperature = 1.,
+    temperature = 0.9,
+    top_p = 0.9, 
+    top_k = 20,
+    repetition_penalty = 1.05, 
     lenience = 1.,
+    accept_threshold = 0.1,
     ):
 
     batch, prompt_len, out, device = 1, int(torch.sum(attention_mask[0])), input_ids.clone(), input_ids.device
@@ -67,7 +80,17 @@ def diffusion_decoding(
     q_logits_all = torch.stack(q_logits_all, dim = -2)
     q_logits = q_logits_all
 
-
+    ### Initialize LogitsProcessor with GenerationConfig
+    logits_processors = LogitsProcessorList()
+    if repetition_penalty is not None and repetition_penalty != 1.0:
+        logits_processors.append(RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty))
+    if temperature is not None and temperature != 1.0:
+        logits_processors.append(TemperatureLogitsWarper(temperature))
+    if top_k is not None and top_k != 0:
+        logits_processors.append(TopKLogitsWarper(top_k=top_k, min_tokens_to_keep=1))
+    if top_p is not None and top_p < 1.0:
+        logits_processors.append(TopPLogitsWarper(top_p=top_p, min_tokens_to_keep=1))
+    
     ### Diffusion decoding
     total_accepted = 0
     itr=0
@@ -77,60 +100,72 @@ def diffusion_decoding(
         out_attention_mask = torch.full_like(out, 1).to(model.device)
         logits = model(out, out_attention_mask).logits
         p_logits = logits[:, prompt_len+total_accepted-1:, :]
-        p_logits = top_k(p_logits, thres = filter_thres)
+        # only support bsz=1 now
+        p_scores = logits_processors(out, p_logits.squeeze(dim=0)).unsqueeze(dim=0)
+        q_scores = logits_processors(out, q_logits.squeeze(dim=0)).unsqueeze(dim=0)
+
         ### prob and prob of draft distribution (p(x) and q(x))
-        p_prob = safe_div(p_logits, temperature).softmax(dim = -1)[:, :, :len(tokenizer)]
-        q_prob = safe_div(q_logits, temperature).softmax(dim = -1)[:, :, :len(tokenizer)]
+        p_prob = nn.functional.softmax(p_scores, dim=-1)[:, :, :len(tokenizer)]
+        q_prob = nn.functional.softmax(q_scores, dim=-1)[:, :, :len(tokenizer)]
 
         p, prob_next = p_prob[:, :-1], p_prob[:, -1]
 
         p = p.gather(-1, q_sampled.unsqueeze(dim=-1))
         q = q_prob.gather(-1, q_sampled.unsqueeze(dim=-1)) * lenience
-
+        
         p, q = [rearrange(t, 'b n 1 -> b n') for t in (p, q)]
         r = random_uniform = torch.zeros_like(q).float().uniform_(0, 1)
-        threshold = torch.tensor(0.3, device=p.device)
-        
-        # accepted = find_first_true_index(r > (p / q))
+        threshold = torch.ones_like(q).float() * accept_threshold
+
         accepted = find_first_true_index(
                 (r > (p / q)) | (p < threshold)
             )
+
         num_accepted = int(accepted[0])
         total_accepted += num_accepted
         out = out[:, :prompt_len+total_accepted]
 
-        has_rejected = torch.tensor(total_accepted < n_token_seq_len, device=out.device)
+        has_rejected = (num_accepted < q.shape[1])
 
         ### sample the additional token to better bound the worst case
-        sample_additional_token = True
-        if has_rejected:
+        sample_additional_token = False
+        if num_accepted == 0: 
+            next_token = torch.multinomial(p_prob[:, num_accepted, :], num_samples=1)
+            out = torch.cat((out, next_token), dim = -1)
+            total_accepted += 1
+            sample_additional_token = True
+        elif has_rejected:
             adjusted_prob = F.relu(p_prob[:, num_accepted, :] - q_prob[:, num_accepted, :])
             adjusted_prob = adjusted_prob / adjusted_prob.sum(dim = -1, keepdim = True)
             prob_next = adjusted_prob
             # if all p_prob < q_prob, prob_next becomes nan, then we do not sample the additional token
             if torch.isnan(prob_next).any():
-                sample_additional_token = False
+                pass
+            else:
+                next_token = torch.multinomial(prob_next, num_samples=1)
+                out = torch.cat((out, next_token), dim = -1)
+                total_accepted += 1                
+                sample_additional_token = True
 
-        if sample_additional_token:
-            next_token = torch.multinomial(prob_next, 1)
+        if not has_rejected:
+            next_token = torch.multinomial(prob_next, num_samples=1)
             out = torch.cat((out, next_token), dim = -1)
             total_accepted += 1
+            return out
 
-        if total_accepted < n_token_seq_len:
-            print(f'total accepted: {total_accepted}')
+        if has_rejected:
             ### update q(x) with self-speculated p(x) and sample new drafts tokens
-            q_logits = p_logits[:, num_accepted+1:-1, :]
-            print(q_logits)
-            q_sampled = gumbel_sample(q_logits, temperature = temperature, dim = -1)
-            # # argmax q_sampled induces draft with repetitive patterns
-            # q_sampled = F.softmax(q_logits, dim=-1).argmax(dim=-1) 
+            if sample_additional_token:
+                q_logits = p_logits[:, num_accepted+1:-1, :]
+                q_probs = p_prob[:, num_accepted+1:-1, :]
+            else:
+                q_logits = p_logits[:, num_accepted:-1, :]
+                q_probs = p_prob[:, num_accepted:-1, :]
+            q_sampled = torch.multinomial(q_probs.squeeze(dim=0), num_samples=1).reshape(1, -1)
             out = torch.cat((out, q_sampled), dim = -1)
             print(f'Itr: {itr}, Accepted tokens: {num_accepted}')
             
         itr+=1
-        
-    # generated_str = ''.join(tokenizer.batch_decode(out[0, prompt_len:], skip_special_tokens=False))
-    # print(generated_str)
     
     return out
 
@@ -178,9 +213,12 @@ while not (input_ids == tokenizer.eos_token_id).any():
         input_ids=input_ids,
         attention_mask=attention_mask,
         n_token_seq_len=64,
-        filter_thres=0.9,
-        temperature = 1.,
-        lenience = 1.
+        temperature = 0.9,
+        top_p = 0.9, 
+        top_k = 20,
+        repetition_penalty = 1.05, 
+        lenience = 1.,
+        accept_threshold = 0.1,
         )
 
     input_ids = generated_ids
