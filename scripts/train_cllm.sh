@@ -2,7 +2,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export WANDB_PROJECT=cllm2_distillation
 
 model_path="/data/phd/kousiqi/kousiqi/ckpts/OpenThinker2-7B"
-trajectory_file="data/collected_diffusion_trajectory/merged_output.json"
+trajectory_file="karrykkk/openthoughts2_1m_jacobi_n_token_seq_len64_labelsFalse_max_seq_len16384"
 output_path="/data/phd/kousiqi/kousiqi/ckpts/cllm-openthinker2-7B"
 n_token_seq_size=64
 qlora=False
@@ -17,7 +17,7 @@ torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 --rdzv_endpoint='localhost:
     --bf16 True \
     --report_to wandb \
     --do_train \
-    --num_train_epochs 2 \
+    --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \
     --gradient_checkpointing True \
@@ -29,7 +29,7 @@ torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 --rdzv_endpoint='localhost:
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \
     --logging_steps 10 \
-    --model_max_length 4096 \
+    --model_max_length 16384 \
     --lazy_preprocess True \
     --qlora ${qlora} \
     --deepspeed "scripts/ds_config.json"
