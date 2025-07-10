@@ -38,11 +38,17 @@ from typing import Dict
 from cllm_trainer import CllmTrainer
 
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+from datasets import load_dataset
 
 import logging
 logger = logging.getLogger(__name__)
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
+
+from pathlib import Path
+
+path_root = Path(__file__).parents[1]
+sys.path.append(str(path_root))
 
 
 @dataclass
@@ -175,7 +181,7 @@ class JacobianDataset(Dataset):
 
 def make_jacobian_data_module(
     tokenizer: transformers.PreTrainedTokenizer,
-    trajectory_path,
+    trajectory_data,
     data_args,
     model: str,
     local_rank: int,
@@ -184,14 +190,8 @@ def make_jacobian_data_module(
     assert data_args.lazy_preprocess, "only support lazy process"
     dataset_cls = JacobianDataset
     rank0_print("Loading data...")
-
-    train_json = json.load(open(trajectory_path, "r"))
-    truncated_train_json = []
-    
-    for data in train_json:
-        # take prompt lengths with limited size if necessary
-        truncated_train_json.append(data)
-    train_dataset = dataset_cls(truncated_train_json,
+            
+    train_dataset = dataset_cls(trajectory_data,
                                 tokenizer=tokenizer,
                                 model=model,
                                 local_rank=local_rank)
@@ -248,7 +248,7 @@ def train():
             f"model_max_length ({training_args.model_max_length}) > orig_ctx_len ({orig_ctx_len})"
         )
     config.use_cache = False
-    
+
     # Load model and tokenizer
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.target_model_path,
@@ -280,8 +280,13 @@ def train():
         model.config.use_cache = False
 
     # Load data
+    trajectory_dataset = load_dataset(
+        data_args.data_path,
+        split="train",
+        cache_dir="/data/phd/kousiqi/kousiqi"
+    )
     data_module = make_jacobian_data_module(tokenizer=tokenizer,
-                                              trajectory_path=data_args.data_path,
+                                              trajectory_data=trajectory_dataset,
                                               data_args=data_args,
                                               model=model_args.target_model_path,
                                               local_rank=training_args.local_rank)
