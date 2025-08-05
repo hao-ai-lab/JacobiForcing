@@ -266,7 +266,6 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len, use_aug, 
             json.dump(new_data, f_merged)  
 
 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 import json
 import math
 import pathlib
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 import os
 import sys
@@ -35,7 +35,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from typing import Dict
 
-from cllm_trainer import CllmTrainer
+from efficient_cllm_trainer import CllmTrainer
 
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from datasets import load_dataset
@@ -80,13 +80,14 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "Size of n_token_sequence in Jacobi trajectory."
         },
     )
-    use_gt_labels: bool = False
     report_to: str = field(
         default='wandb',
         metadata={
             'help': 'The list of integrations to report the results and logs to.'
         }
     )
+    use_gt_labels: bool = False
+    remove_unused_columns: bool = field(default=False)
 
 def rank0_print(local_rank, *args):
     if local_rank == 0:
@@ -101,44 +102,31 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
         del state_dict
         trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
 
-def preprocess_distill_data(
-    prompt_ids,
-    answer_trajectory_ids,
-    teacher_output_ids,
+def preprocess_training_sequence(
+    prompt_ids: List[int],
+    prompt_ids_len: int,
+    complete_training_sequence_ids: List[int],
     tokenizer: transformers.PreTrainedTokenizer,
     model: str,
-    labels_ids=None,
+    labels_ids: List[int],
+    traj_position_indices: List[int],
 ) -> Dict:
-    
-    jacobian_trajectory_ids = []
-    # only take batch size 1 for now
-    # TODO: support bsz > 1 from the generation script. for now, only prompt ids is in (bsz, seq_len)
-    jacobian_prompt_ids = torch.tensor(prompt_ids, dtype=torch.int64)
-    teacher_output_ids = torch.tensor(teacher_output_ids, dtype=torch.int64)
-    for answer_ids in answer_trajectory_ids:
-        answer_ids = torch.tensor(answer_ids, dtype=torch.int64)
+    """
+    Preprocess a single training example for model input.
+    """
+    prompt_ids = torch.tensor(prompt_ids)
+    complete_training_sequence_ids = torch.tensor(complete_training_sequence_ids)
+    attention_mask = prompt_ids.ne(tokenizer.pad_token_id)
 
-        if len(jacobian_prompt_ids.shape) == len(answer_ids.shape):
-            trajectory_ids = torch.cat((jacobian_prompt_ids, answer_ids), dim=-1)
-        elif len(jacobian_prompt_ids.shape) > len(answer_ids.shape):
-            trajectory_ids = torch.cat((jacobian_prompt_ids[0], answer_ids), dim=-1)
-        else:
-            raise 
-        jacobian_trajectory_ids.append(trajectory_ids)
-
-    if labels_ids:
-        return dict(
-            jacobian_trajectory=jacobian_trajectory_ids,
-            attention_mask=jacobian_trajectory_ids[0].ne(tokenizer.pad_token_id),
-            labels_ids=labels_ids,
-            teacher_output_ids=teacher_output_ids,
-        )
-    else:
-        return dict(
-            jacobian_trajectory=jacobian_trajectory_ids,
-            attention_mask=jacobian_trajectory_ids[0].ne(tokenizer.pad_token_id),
-            teacher_output_ids=teacher_output_ids,
-        )
+    result = dict(
+        prompt_ids=prompt_ids,
+        prompt_ids_len=prompt_ids_len,
+        input_ids=complete_training_sequence_ids,
+        attention_mask=attention_mask,
+        labels_ids=labels_ids,
+        traj_position_indices=traj_position_indices
+    )
+    return result
     
 class JacobianDataset(Dataset):
     """Dataset for consistency training."""
@@ -148,11 +136,9 @@ class JacobianDataset(Dataset):
                  model: str,
                  do_eval: bool = False,
                  local_rank: int = -1):
-        super(JacobianDataset, self).__init__()
+        super().__init__()
         self.tokenizer = tokenizer
-
         rank0_print(local_rank, "Formatting inputs...Skip in lazy mode")
-        self.tokenizer = tokenizer
         self.raw_data = raw_data
         self.cached_data_dict = {}
         self.do_eval = do_eval
@@ -164,24 +150,17 @@ class JacobianDataset(Dataset):
     def __getitem__(self, i) -> Dict:
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
-        if 'labels_ids' in self.raw_data[i].keys():
-            ret = preprocess_distill_data(
-                        self.raw_data[i]["prompt_ids"],
-                        self.raw_data[i]["answer_trajectory_ids"],
-                        self.raw_data[i]["teacher_output_ids"],
-                        self.tokenizer,
-                        self.model,
-                        labels_ids=self.raw_data[i]["labels_ids"])
-        else:
-            ret = preprocess_distill_data(
-                        self.raw_data[i]["prompt_ids"],
-                        self.raw_data[i]["answer_trajectory_ids"],
-                        self.raw_data[i]["teacher_output_ids"],
-                        self.tokenizer,
-                        self.model)
-        
+        sample = self.raw_data[i]
+        ret = preprocess_training_sequence(
+            sample["prompt_ids"],
+            sample["prompt_ids_len"],
+            sample["complete_training_sequence_ids"],
+            self.tokenizer,
+            self.model,
+            labels_ids=sample["labels_ids"],
+            traj_position_indices=sample["traj_position_indices"],
+        )
         self.cached_data_dict[i] = ret
-
         return ret
 
 
@@ -260,7 +239,7 @@ def train():
         model_args.target_model_path,
         config=config,
         cache_dir=training_args.cache_dir,
-        attn_implementation='flash_attention_2',
+        attn_implementation="eager",
         torch_dtype=torch.bfloat16,
     )
 
@@ -292,13 +271,13 @@ def train():
             'train': data_args.data_path,
         },
         split='train',
-        cache_dir='/checkpoint/lhu/data/CLLM2_openthought/cache'
+        cache_dir='/checkpoint/lhu/data/CLLM2_openthought/trajectory_cache'
     )
     data_module = make_jacobian_data_module(tokenizer=tokenizer,
-                                              trajectory_data=trajectory_dataset,
-                                              data_args=data_args,
-                                              model=model_args.target_model_path,
-                                              local_rank=training_args.local_rank)
+                                            trajectory_data=trajectory_dataset,
+                                            data_args=data_args,
+                                            model=model_args.target_model_path,
+                                            local_rank=training_args.local_rank)
 
     trainer = CllmTrainer(
         model=model, tokenizer=tokenizer, args=training_args, **data_module

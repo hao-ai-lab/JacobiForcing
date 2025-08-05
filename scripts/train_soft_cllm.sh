@@ -10,7 +10,7 @@ qlora=False
 torchrun --nnodes=1 --nproc_per_node=4 --rdzv_id=101 \
     --rdzv_endpoint='localhost:5666' \
     --master_port 10000 \
-    train/train_cllm.py \
+    train/train_soft_cllm_loss.py \
     --target_model_path ${model_path} \
     --data_path ${trajectory_file} \
     --output_dir ${output_path} \

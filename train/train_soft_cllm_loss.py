@@ -35,7 +35,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from typing import Dict
 
-from cllm_trainer import CllmTrainer
+from soft_cllm_loss_trainer import CllmTrainer
 
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from datasets import load_dataset

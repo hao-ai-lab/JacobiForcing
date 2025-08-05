@@ -73,6 +73,6 @@ def profile(file, max_rows=100):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--file")
-    parser.add_argument("--max_rows", type=int, default=100000)
+    parser.add_argument("--max_rows", type=int, default=100)
     args = parser.parse_args()
     profile(args.file, args.max_rows)
