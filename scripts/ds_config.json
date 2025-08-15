@@ -1,12 +1,16 @@
 {
   "zero_optimization": {
     "stage": 3,
+    "offload_optimizer": {
+      "device": "cpu",
+      "pin_memory": true
+    },
     "allgather_partitions": true,
     "allgather_bucket_size": 200000000,
     "overlap_comm": true,
     "reduce_scatter": true,
     "reduce_bucket_size": 500000000,
-    "contiguous_gradients": false
+    "contiguous_gradients": true
   },
   "gradient_accumulation_steps": 1,
   "train_micro_batch_size_per_gpu": 1,

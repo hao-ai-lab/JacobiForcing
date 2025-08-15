@@ -8,6 +8,8 @@ import random
 import math
 import json
 
+import pandas as pd
+
 from pathlib import Path
 import sys
 path_root = Path(__file__).parents[1]
@@ -165,14 +167,18 @@ def diffusion_decoding(
     return out
 
 ### Load dataset...
-data = []
-with open("data/raw_data/openthoughts2_1m.json", 'r') as f:
-    for idx, line in enumerate(f):
-        if idx>150:
-            break
-        data.append(json.loads(line))
+#data = []
+#with open("data/raw_data/openthoughts2_1m.json", 'r') as f:
+#    for idx, line in enumerate(f):
+#        if idx>150:
+#            break
+#        data.append(json.loads(line))
 
-model_name = "/data/phd/kousiqi/kousiqi/ckpts/OpenThinker2-7B"
+data = []
+df = pd.read_parquet("/checkpoint/lhu/data/OpenThoughts-114k/data/train-00001-of-00006.parquet")
+data = df.head(100).to_dict(orient="records")
+
+model_name = "/checkpoint/lhu/train_ckpts/cllm/trial-0-orderly-efficient-train-cllm-openthinker2-7B-ntok32-eos_tokens-without_think_format_split_ratio_40_size_2848_ntok_64_sampling_ratio_1_lookup_size_640_cllm_soft_loss_length_capped_16k_flexattn/hf_merged"
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
@@ -180,7 +186,7 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype=torch.bfloat16, 
     attn_implementation="flash_attention_2"
 )
-tokenizer = AutoTokenizer.from_pretrained("/data/phd/kousiqi/kousiqi/ckpts/OpenThinker2-7B")
+tokenizer = AutoTokenizer.from_pretrained("/checkpoint/lhu/models/OpenThinker2-7B")
 tokenizer.padding_side = "left"
 #TODOs: Check if this is okay
 print(f'Changing padding_side to {tokenizer.padding_side}')
@@ -192,7 +198,8 @@ print('Padding token is the same as EOS token')
 #     data[2]['conversations'][0]["value"],
 # ]
 prompts = [
-    data[1]['conversations'][0]["value"]]
+    data[1]['conversations'][0]["value"]
+]
 
 texts = []
 for prompt in prompts:

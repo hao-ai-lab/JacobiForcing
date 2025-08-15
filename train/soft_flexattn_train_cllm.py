@@ -161,7 +161,7 @@ def train():
 
     training_args.qlora = model_args.qlora
 
-    training_args.deepspeed = training_args.deepspeed or "scripts/ds_config.json"
+    training_args.deepspeed = training_args.deepspeed or "scripts/ds_config_cpu_offloading.json"
 
     # Accelerate + DeepSpeed plugin
     ds_plugin = DeepSpeedPlugin(hf_ds_config=training_args.deepspeed)  # path or dict
@@ -225,7 +225,6 @@ def train():
         model = prepare_model_for_kbit_training(model)
         lora_cfg = LoraConfig(task_type=TaskType.CAUSAL_LM, r=32, lora_alpha=16, lora_dropout=0.05)
         model = get_peft_model(model, lora_cfg)
-        model.config.use_cache = False
 
     # Data Prep
     trajectory_dataset = load_dataset(

@@ -84,7 +84,7 @@ class CllmTrainer(Trainer):
         l_start: int,
         N: int,
         eos_id: int | None,
-        drop_last_offset: bool = True,
+        drop_last_offset: bool = True,   # NEW default
     ) -> torch.Tensor:
         """
         Returns [N-1] bool if drop_last_offset else [N] bool.
@@ -127,43 +127,8 @@ class CllmTrainer(Trainer):
         l_starts = [prompt_len + (2 * j + 1) * N for j in range(T)]
         return k_starts, l_starts
 
-    def _build_shared_position_ids(self, L: int, prompt_len: int, T: int):
-        """
-        Build [L] position_ids so each (k_j, last_j) share the same positions.
-        Prompt: 0...prompt_len-1
-        For each j: both blocks use prompt_len + j*N .. prompt_len + j*N + (N-1)
-        """
-        device = self.args.device
-        N = self.max_new_tokens
-        pos = torch.empty(L, dtype=torch.long, device=device)
-
-        # Prompt positions
-        pos[:prompt_len] = torch.arange(prompt_len, device=device)
-
-        # Pair-shared positions
-        k_starts, l_starts = self._index_layout(prompt_len, T, N)
-        rel = torch.arange(N, device=device)
-        for j in range(T):
-            base = prompt_len + j * N
-            ks = k_starts[j]
-            ls = l_starts[j]
-            pos[ks:ks + N] = base + rel
-            pos[ls:ls + N] = base + rel
-
-        return pos
-    
-    def soft_cross_entropy(self, predicts, targets, padding_mask):
-        if (~padding_mask).sum() == 0:
-            return 0 * predicts[0][0]
-        predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
-        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
-        entropy = -targets_prob * predict_log_prob
-        expand_mask = padding_mask.unsqueeze(-1).expand_as(entropy)
-        entropy = entropy.masked_fill(expand_mask, 0)
-        mean_entropy = entropy.sum() / (~padding_mask).sum()
-        return mean_entropy
-
-    # FlexAttention BlockMask
+    # FlexAttention BlockMask (single-pass version)
+    # Enforces:
     #  - prompt queries: causal within prompt
     #  - k_j queries: causal within *their own* k_j block + prompt
     #  - last_j queries: causal within *their own* last_j block + prompt
@@ -175,8 +140,8 @@ class CllmTrainer(Trainer):
         N = self.max_new_tokens
         k_starts, l_starts = self._index_layout(prompt_len, T, N)
 
-        ks = torch.tensor(k_starts, device=self.args.device)
-        ls = torch.tensor(l_starts, device=self.args.device)
+        ks = torch.tensor(k_starts, device=self.args.device)  # [T]
+        ls = torch.tensor(l_starts, device=self.args.device)  # [T]
 
         def mask_mod(b, h, q, k):
             # q, k: any shape, torch tensors
@@ -194,21 +159,20 @@ class CllmTrainer(Trainer):
             is_lastj_k = (k >= prompt_len) & (block_idx_k % 2 == 1)
 
             # j index for q, clamped to [0, T-1]
-            # half blocks belong to k_j, half to last_j
             j_q = torch.clamp(block_idx_q // 2, min=0, max=T - 1)
 
             ks_per_q = ks[j_q]
             ls_per_q = ls[j_q]
 
-            # queries attended to all previous last_* blocks.
+            # allow queries to attend to all *previous* last_* blocks.
             # This makes every last_j visible to all future k_{j+i} and last_{j+i}.
             k_in_prev_last = is_lastj_k & (block_idx_k < 2 * j_q)
 
             # Prompt is always causal
             mask_prompt = is_prompt_q & (k <= q)
 
-            # prompt (causal) + same k_j block (causal)
-            # attended to last_* blocks
+            # k_j queries: prompt (causal) + same k_j block (causal)
+            #            + any *previous* last_* blocks (causal by construction)
             same_kj_block = is_kj_q & is_kj_k & (block_idx_q == block_idx_k)
             mask_kj = is_kj_q & (
                 (is_prompt_k & (k <= q)) |
@@ -216,8 +180,8 @@ class CllmTrainer(Trainer):
                 (same_kj_block & (k >= ks_per_q) & (k <= q))
             )
 
-            # prompt (causal) + same last_j block (causal)
-            # attended to last_* blocks
+            # last_j queries: prompt (causal) + same last_j block (causal)
+            #               + previous last_* blocks
             same_lastj_block = is_lastj_q & is_lastj_k & (block_idx_q == block_idx_k)
             mask_lastj = is_lastj_q & (
                 (is_prompt_k & (k <= q)) |
@@ -233,6 +197,8 @@ class CllmTrainer(Trainer):
         self._blockmask_cache[cache_key] = block_mask
         return block_mask
 
+
+    # Training Step
     def training_step(self, model, inputs, num_items_in_batch=None):
         self.train_step_cnt += 1
         return self._one_pass_losses_step(model, inputs)
@@ -256,17 +222,16 @@ class CllmTrainer(Trainer):
 
         # ===== Debug printing =====
         # detok the AR input sequence
-        #prompt_ids_block = input_ids[:prompt_len]
-        #l_blocks_concat = torch.cat([input_ids[ls : ls + N] for ls in l_starts], dim=0)
-        #ar_concat_ids = torch.cat([prompt_ids_block, l_blocks_concat], dim=0)
+        prompt_ids_block = input_ids[:prompt_len]
+        l_blocks_concat = torch.cat([input_ids[ls : ls + N] for ls in l_starts], dim=0)
+        ar_concat_ids = torch.cat([prompt_ids_block, l_blocks_concat], dim=0)
 
-        #print("\n=== AR INPUTS (prompt + concatenated l_j blocks) ===")
-        
+        print("\n=== AR INPUTS (prompt + concatenated l_j blocks) ===")
         # Decode
-        #ar_text = self.processing_class.decode(ar_concat_ids, skip_special_tokens=False)
+        ar_text = self.processing_class.decode(ar_concat_ids, skip_special_tokens=False)
 
-        #print("\n[Decoded text]")
-        #print(ar_text)
+        print("\n[Decoded text]")
+        print(ar_text)
 
         # Print all k_j blocks separately
         #print("\n=== k_j BLOCKS ===")
@@ -279,7 +244,7 @@ class CllmTrainer(Trainer):
         # ==========================
         
         # mark PAD as 0
-        #attn_mask[input_ids == pad_id] = 0
+        attn_mask[input_ids == pad_id] = 0
 
         # cut post-EOS inside last_N block (the last last_j)
         for j in range(T):
@@ -292,50 +257,46 @@ class CllmTrainer(Trainer):
 
         # Build structural block mask
         num_heads = getattr(self.cfg, 'num_attention_heads', 28)
-        #print(f"num heads from config: {self.cfg.num_attention_heads}")
-        #print(f"[block mask] num_heads={num_heads}, L={L}, prompt_len={prompt_len}, T={T}, N={N}")
+        print(f"num heads from config: {self.cfg.num_attention_heads}")
+        print(f"[block mask] num_heads={num_heads}, L={L}, prompt_len={prompt_len}, T={T}, N={N}")
         blk_mask = self._build_block_mask(L, prompt_len, T, num_heads)
-
-        # shared position ids for each (k_j, last_j) pair
-        position_ids = self._build_shared_position_ids(L, prompt_len, T)
 
         outputs = model(
             input_ids=input_ids.unsqueeze(0),
             attention_mask=attn_mask.unsqueeze(0),
             block_mask=blk_mask,
-            position_ids=position_ids.unsqueeze(0),
             attn_implementation="flex_attention",
         )
-        logits = outputs.logits
+        logits = outputs.logits  # [1, L, V]
 
         # ========== AR loss ==========
-        # gather (logit_pos --> target_pos) pairs
-        # run soft CE.
-        pair_logit_positions = []
-        pair_target_positions = []
+        ar_labels = torch.full((1, L), IGNORE_TOKEN_ID, device=self.args.device)
 
-        def add_forward_pairs(seg_start: int, seg_end: int):
-            """
-            Add all in-block next-token pairs for a segment [seg_start, seg_end).
-            Produces pairs (p -> p+1) for p in [seg_start .. seg_end-2].
-            """
-            if seg_end - seg_start > 1:
-                p = torch.arange(seg_start, seg_end - 1, device=self.args.device, dtype=torch.long)
-                t = p + 1
-                pair_logit_positions.append(p)
-                pair_target_positions.append(t)
+        # include prompt tokens in AR labels (up to EOS/PAD)
+        end = prompt_len
+        if eos_id is not None:
+            pos = (input_ids[:prompt_len] == eos_id).nonzero(as_tuple=False)
+            if pos.numel():
+                end = min(end, int(pos[0]) + 1)  # keep through EOS itself
+        if pad_id is not None:
+            pos = (input_ids[:prompt_len] == pad_id).nonzero(as_tuple=False)
+            if pos.numel():
+                end = min(end, int(pos[0]))
+        if end > 0:
+            ar_labels[0, :end] = input_ids[:end]
 
-        # Prompt segment
-        end_prompt = prompt_len
-        add_forward_pairs(0, end_prompt)
-
-        # for each j, we need an effective length ('end' from j-1) to compute first-token loss in last_j
-        last_effective_ends = []
+        # existing last_j labeling (unchanged)
         for j in range(T):
             ls = l_starts[j]
             block = input_ids[ls : ls + N]
 
-            # respect EOS inside the block
+            # stop at first PAD too, if present
+            first_pad = None
+            if pad_id is not None:
+                pad_pos = torch.nonzero(block == pad_id, as_tuple=False)
+                first_pad = int(pad_pos[0]) if pad_pos.numel() > 0 else None
+
+            # inspect EOS
             eos_pos = None
             if eos_id is not None:
                 epos = torch.nonzero(block == eos_id, as_tuple=False)
@@ -343,51 +304,18 @@ class CllmTrainer(Trainer):
 
             end = N
             if eos_pos is not None:
-                end = min(end, eos_pos + 1)  # include EOS in segment
+                end = min(end, eos_pos + 1)  # keep through EOS
+            if first_pad is not None:
+                end = min(end, first_pad)
 
-            # in-block forward pairs
-            add_forward_pairs(ls, ls + end)
-            last_effective_ends.append(end)
+            if end > 0:
+                ar_labels[0, ls : ls + end] = input_ids[ls : ls + end]
 
-            if eos_pos is not None:
-                # push this end; later bridging logic will naturally stop if j == T-1
-                for _ in range(j + 1, T):
-                    last_effective_ends.append(0)
+            if eos_pos is not None or first_pad is not None:
                 break
 
-        # Bridges: (last_{j-1} last token logits) -> (first token of last_j)
-        # Note: This skips the intervening k_j block
-        for j in range(1, T):
-            prev_end = last_effective_ends[j - 1]
-            if prev_end is None or prev_end <= 0:
-                continue
-            prev_ls = l_starts[j - 1]
-            logit_pos = prev_ls + (prev_end - 1)
-            target_pos = l_starts[j]
-
-            # edge case: skip if target is PAD
-            if pad_id is not None and input_ids[target_pos].item() == pad_id:
-                continue
-
-            pair_logit_positions.append(torch.tensor([logit_pos], device=self.args.device, dtype=torch.long))
-            pair_target_positions.append(torch.tensor([target_pos], device=self.args.device, dtype=torch.long))
-
-        # Compute CE over all pairs
-        if len(pair_logit_positions) == 0:
-            loss_ar = torch.zeros((), device=self.args.device)
-        else:
-            p_all = torch.cat(pair_logit_positions, dim=0)
-            t_all = torch.cat(pair_target_positions, dim=0)
-
-            ar_logits  = logits[0, p_all, :]                 # [K, V]
-            ar_targets = input_ids.index_select(0, t_all)    # [K]
-
-            loss_ar = F.cross_entropy(
-                ar_logits.float(),
-                ar_targets,
-                reduction="mean",
-                label_smoothing=0.1,
-            ) * 10
+        label_smoother = LabelSmoother(epsilon=0.1, ignore_index=IGNORE_TOKEN_ID)
+        loss_ar = label_smoother(outputs, ar_labels, shift_labels=True) * 5
 
         # ========== Consistency loss ==========
         T_soft = getattr(self.args, "distill_temperature", 1.0)
@@ -408,34 +336,21 @@ class CllmTrainer(Trainer):
         if len(student_positions) == 0:
             loss_consistency = torch.zeros((), device=self.args.device)
         else:
-            sp = torch.cat(student_positions, dim=0)  # [K]
-            tp = torch.cat(teacher_positions, dim=0)  # [K]
+            sp = torch.cat(student_positions, dim=0)
+            tp = torch.cat(teacher_positions, dim=0)
 
-            # construct validity mask: current and next tokens must be non-PAD on both sides
-            if pad_id is not None:
-                pad1d = (input_ids != pad_id)
+            pad1d = (input_ids != pad_id) if pad_id is not None else torch.ones_like(input_ids, dtype=torch.bool)
+            keep = pad1d.index_select(0, sp) & pad1d.index_select(0, tp)
+            keep = keep & pad1d.index_select(0, sp + 1) & pad1d.index_select(0, tp + 1)
+
+            if keep.any():
+                student_logits_sel = logits[0, sp[keep], :]
+                teacher_logits_sel = logits[0, tp[keep], :].detach()
+                log_ps = F.log_softmax(student_logits_sel / T_soft, dim=-1)
+                p_t = F.softmax(teacher_logits_sel / T_soft, dim=-1)
+                loss_consistency = (-(p_t * log_ps).sum(dim=-1)).mean() * (T_soft * T_soft)
             else:
-                pad1d = torch.ones_like(input_ids, dtype=torch.bool)
-
-            valid = pad1d.index_select(0, tp)
-            valid = pad1d.index_select(0, tp + 1)
-
-            # Build logits for all candidate pairs
-            student_logits_all = logits[0, sp, :]
-            teacher_logits_all = logits[0, tp, :].detach()
-
-            padding_mask = ~valid
-
-            student_logits_all = student_logits_all / T_soft
-            teacher_logits_all = teacher_logits_all / T_soft
-
-            loss_consistency = self.soft_cross_entropy(
-                student_logits_all.float(),
-                teacher_logits_all.float(),
-                padding_mask
-            )
-
-            loss_consistency = loss_consistency * (T_soft * T_soft)
+                loss_consistency = torch.zeros((), device=self.args.device)
 
         total_loss = loss_ar + loss_consistency
         if self.args.qlora:
@@ -445,7 +360,7 @@ class CllmTrainer(Trainer):
             wandb.log({"ar loss": float(loss_ar.detach().cpu()),
                     "consistency loss": float(loss_consistency.detach().cpu())})
 
-        del outputs, logits
+        del outputs, logits, ar_labels, label_smoother
         torch.cuda.empty_cache()
 
         with self.accelerator.accumulate(model):
@@ -455,4 +370,3 @@ class CllmTrainer(Trainer):
             torch.distributed.barrier()
 
         return total_loss.detach()
-

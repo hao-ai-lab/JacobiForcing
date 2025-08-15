@@ -71,8 +71,6 @@ def process_one_sample(
     diffusion_itr    = parse_itr_int(diffusion_itr_id)
 
     prompt_ids       = sample["prompt_ids"]
-    #prompt_ids_len   = sample["prompt_ids_len"]
-    #labels_ids       = sample["labels_ids"]
     answer_traj      = sample["answer_trajectory_ids"]
 
     if len(answer_traj) < 2:
@@ -85,13 +83,11 @@ def process_one_sample(
     fixed_seq   = answer_traj[-1][-n_token_seq_length:]
 
     pair_seq = list(sampled_seq) + list(fixed_seq)
-
+    
     entry = dict(
         data_id=data_id,
         data_id_int=int(data_id_int),
-        #prompt_ids_len=prompt_ids_len,
         prompt_ids=list(prompt_ids),
-        #labels_ids=list(labels_ids),
         pairs=[dict(
             diffusion_itr=int(diffusion_itr),  # for sorting
             traj_position_index=int(k_j),
@@ -215,16 +211,16 @@ def main():
             concatenated_pairs: List[int] = list(
                 itertools.chain.from_iterable(p["seq"] for p in pairs_sorted)
             )
+
             traj_position_indices: List[int] = list(
                 p["traj_position_index"] for p in pairs_sorted
             )
 
             output_entry = dict(
                 data_id               = entry["data_id"],
-                #prompt_ids_len        = entry["prompt_ids_len"],
-                prompt_ids            = entry["prompt_ids"],
-                #labels_ids            = entry["labels_ids"],
-                complete_training_sequence_ids = entry["prompt_ids"] + concatenated_pairs,
+                prompt_ids            = entry["prompt_ids"][0],
+                complete_training_sequence_ids = entry["prompt_ids"][0] + concatenated_pairs,
+                prompt_ids_len = len(entry["prompt_ids"][0]),
                 traj_position_indices = traj_position_indices,
             )
             fout.write(json.dumps(output_entry, ensure_ascii=False))
