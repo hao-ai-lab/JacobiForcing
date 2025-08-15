@@ -411,14 +411,13 @@ class CllmTrainer(Trainer):
             sp = torch.cat(student_positions, dim=0)  # [K]
             tp = torch.cat(teacher_positions, dim=0)  # [K]
 
-            # construct validity mask: current and next tokens must be non-PAD on both sides
-            if pad_id is not None:
-                pad1d = (input_ids != pad_id)
-            else:
-                pad1d = torch.ones_like(input_ids, dtype=torch.bool)
+            am = attn_mask.to(torch.bool)
 
-            valid = pad1d.index_select(0, tp)
-            valid = pad1d.index_select(0, tp + 1)
+            # current and next-token must be valid on BOTH sides
+            valid = (
+                am.index_select(0, tp) &
+                am.index_select(0, tp + 1)
+            )
 
             # Build logits for all candidate pairs
             student_logits_all = logits[0, sp, :]
@@ -455,4 +454,3 @@ class CllmTrainer(Trainer):
             torch.distributed.barrier()
 
         return total_loss.detach()
-
