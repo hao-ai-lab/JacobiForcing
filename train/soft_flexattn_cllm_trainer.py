@@ -62,20 +62,52 @@ class CllmTrainer(Trainer):
             T,
         )
     
-    def _padding_mask_1d(self, inputs, input_ids: torch.Tensor) -> torch.Tensor:
+    def _duplicate_prefix_mask(self, input_ids: torch.Tensor, prompt_len: int, T: int) -> torch.Tensor:
         """
-        [L] bool mask: True = real token, False = pad.
+        [L] bool: True where token should be masked because it's in k_j's prefix
+        identical to last_j (from left to right until first divergence).
+        Only k_j tokens are masked; last_j tokens are not.
         """
-        device = self.args.device
-        pad_id = getattr(self.processing_class, "pad_token_id")
-        print(f"[padding mask] pad_id={pad_id}")
-        return (input_ids != pad_id).to(device)
-    
-    def _first_eos_index(self, tokens: torch.Tensor, eos_id: int | None) -> int | None:
-        if eos_id is None:
-            return None
-        pos = torch.nonzero(tokens == eos_id, as_tuple=False)
-        return int(pos[0]) if pos.numel() > 0 else None
+        device = input_ids.device
+        N = self.max_new_tokens
+        L = input_ids.size(0)
+        mask = torch.zeros(L, dtype=torch.bool, device=device)
+
+        k_starts, l_starts = self._index_layout(prompt_len, T, N)
+        for j in range(T):
+            ks = k_starts[j]
+            ls = l_starts[j]
+            k_block = input_ids[ks:ks + N]
+            l_block = input_ids[ls:ls + N]
+
+            eq = (k_block == l_block)
+            # find first index where they differ
+            if torch.any(~eq):
+                first_diff = int(torch.nonzero(~eq, as_tuple=False)[0])
+            else:
+                # fully identical: mask the whole k_j block
+                first_diff = N
+
+            if first_diff > 0:
+                mask[ks:ks + first_diff] = True
+
+        return mask
+
+    def _build_padding_mask_for_loss(self, input_ids: torch.Tensor, prompt_len: int, T: int) -> torch.Tensor:
+        """
+        [L] bool padding mask used for losses:
+        True = mask, False = keep.
+        Combines: (a) PAD tokens, (b) duplicate-prefix in each k_j vs last_j.
+        """
+        device = input_ids.device
+        pad_id = getattr(self.processing_class, "pad_token_id", None)
+
+        mask = torch.zeros_like(input_ids, dtype=torch.bool, device=device)
+        if pad_id is not None:
+            mask |= (input_ids == pad_id)
+
+        mask |= self._duplicate_prefix_mask(input_ids, prompt_len, T)
+        return mask
 
     def _block_keep_mask_divergence_and_eos(
         self,
@@ -251,9 +283,6 @@ class CllmTrainer(Trainer):
                 f"Length mismatch: L={L}, expected {expected_len} (prompt_len={prompt_len}, T={T}, n_token_sequence_size={N})"
             )
 
-        attn_mask = torch.ones(L, dtype=torch.long, device=input_ids.device)
-        k_starts, l_starts = self._index_layout(prompt_len, T, N)
-
         # ===== Debug printing =====
         # detok the AR input sequence
         #prompt_ids_block = input_ids[:prompt_len]
@@ -277,9 +306,9 @@ class CllmTrainer(Trainer):
         #    print(block_text)
         #    print()
         # ==========================
-        
-        # mark PAD as 0
-        #attn_mask[input_ids == pad_id] = 0
+
+        attn_mask = torch.ones(L, dtype=torch.long, device=input_ids.device)
+        k_starts, l_starts = self._index_layout(prompt_len, T, N)
 
         # cut post-EOS inside last_N block (the last last_j)
         for j in range(T):
@@ -289,6 +318,8 @@ class CllmTrainer(Trainer):
             if pos.numel():
                 first_eos_pos = starting_pos + int(pos[0])
                 attn_mask[first_eos_pos + 1 : starting_pos + N] = 0
+        # mark PAD as 0 for attn_mask
+        attn_mask[input_ids == pad_id] = 0
 
         # Build structural block mask
         num_heads = getattr(self.cfg, 'num_attention_heads', 28)
@@ -327,14 +358,23 @@ class CllmTrainer(Trainer):
 
         # Prompt segment
         end_prompt = prompt_len
-        add_forward_pairs(0, end_prompt)
+        add_forward_pairs(1, end_prompt)
 
         # for each j, we need an effective length ('end' from j-1) to compute first-token loss in last_j
-        last_effective_ends = []
         for j in range(T):
             ls = l_starts[j]
-            block = input_ids[ls : ls + N]
 
+            # first append bridging token
+            if j > 0:
+                prev_ls = l_starts[j - 1]
+                logit_pos = prev_ls + (N - 1)
+                target_pos = ls
+
+                pair_logit_positions.append(torch.tensor([logit_pos], device=self.args.device))
+                pair_target_positions.append(torch.tensor([target_pos], device=self.args.device))
+
+            # handle block
+            block = input_ids[ls : ls + N]
             # respect EOS inside the block
             eos_pos = None
             if eos_id is not None:
@@ -345,32 +385,31 @@ class CllmTrainer(Trainer):
             if eos_pos is not None:
                 end = min(end, eos_pos + 1)  # include EOS in segment
 
+            #print(f"ending position for block {j}: {end}")
+
             # in-block forward pairs
             add_forward_pairs(ls, ls + end)
-            last_effective_ends.append(end)
-
             if eos_pos is not None:
-                # push this end; later bridging logic will naturally stop if j == T-1
-                for _ in range(j + 1, T):
-                    last_effective_ends.append(0)
                 break
 
         # Bridges: (last_{j-1} last token logits) -> (first token of last_j)
         # Note: This skips the intervening k_j block
-        for j in range(1, T):
-            prev_end = last_effective_ends[j - 1]
-            if prev_end is None or prev_end <= 0:
-                continue
-            prev_ls = l_starts[j - 1]
-            logit_pos = prev_ls + (prev_end - 1)
-            target_pos = l_starts[j]
+        #for j in range(1, T):
+            # length of the 
+        #    prev_end = last_effective_ends[j - 1]
+
+        #    prev_ls = l_starts[j - 1]
+            # last token logit from last_{j-1}
+        #    logit_pos = prev_ls + (prev_end - 1)
+            # first token target from last_j
+        #    target_pos = l_starts[j]
 
             # edge case: skip if target is PAD
-            if pad_id is not None and input_ids[target_pos].item() == pad_id:
-                continue
+        #    if pad_id is not None and input_ids[target_pos].item() == pad_id:
+        #        continue
 
-            pair_logit_positions.append(torch.tensor([logit_pos], device=self.args.device, dtype=torch.long))
-            pair_target_positions.append(torch.tensor([target_pos], device=self.args.device, dtype=torch.long))
+        #    pair_logit_positions.append(torch.tensor([logit_pos], device=self.args.device, dtype=torch.long))
+        #    pair_target_positions.append(torch.tensor([target_pos], device=self.args.device, dtype=torch.long))
 
         # Compute CE over all pairs
         if len(pair_logit_positions) == 0:
@@ -381,6 +420,12 @@ class CllmTrainer(Trainer):
 
             ar_logits  = logits[0, p_all, :]                 # [K, V]
             ar_targets = input_ids.index_select(0, t_all)    # [K]
+
+            # ===== DEBUG PRINTING ===== #
+            if self.args.local_rank == 0:
+                print(f"===== decoded last_N AR targets =====\n{self.processing_class.decode(ar_targets[-64:])}\n==========\n")
+                print(f"===== last_N AR tokens =====\n{ar_targets[-64:]}\n==========\n")
+            # ===== DEBUG PRINTING ===== #
 
             loss_ar = F.cross_entropy(
                 ar_logits.float(),
@@ -411,19 +456,16 @@ class CllmTrainer(Trainer):
             sp = torch.cat(student_positions, dim=0)  # [K]
             tp = torch.cat(teacher_positions, dim=0)  # [K]
 
-            am = attn_mask.to(torch.bool)
 
-            # current and next-token must be valid on BOTH sides
-            valid = (
-                am.index_select(0, tp) &
-                am.index_select(0, tp + 1)
-            )
+            # build global [L] padding mask: PADs and duplicate k_j prefixes
+            global_pad_and_dup_mask = self._build_padding_mask_for_loss(input_ids, prompt_len, T)
+            
+            # per-pair padding mask for soft CE (True = masking out)
+            padding_mask = global_pad_and_dup_mask.index_select(0, sp)
 
             # Build logits for all candidate pairs
             student_logits_all = logits[0, sp, :]
             teacher_logits_all = logits[0, tp, :].detach()
-
-            padding_mask = ~valid
 
             student_logits_all = student_logits_all / T_soft
             teacher_logits_all = teacher_logits_all / T_soft
