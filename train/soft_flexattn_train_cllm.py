@@ -105,17 +105,16 @@ def preprocess_training_sequence(
     complete_training_sequence_ids: List[int],
     tokenizer: transformers.PreTrainedTokenizer,
     model: str,
-    labels_ids: List[int],
     traj_position_indices: List[int],
 ) -> Dict:
     prompt_ids = torch.tensor(prompt_ids, dtype=torch.long)
     complete_training_sequence_ids = torch.tensor(complete_training_sequence_ids, dtype=torch.long)
-    labels_ids = torch.tensor(labels_ids, dtype=torch.long)
+    #labels_ids = torch.tensor(labels_ids, dtype=torch.long)
     return dict(
         prompt_ids=prompt_ids,
         prompt_ids_len=prompt_ids_len,
         input_ids=complete_training_sequence_ids,
-        labels_ids=labels_ids,
+        #labels_ids=labels_ids,
         traj_position_indices=torch.tensor(traj_position_indices, dtype=torch.long).unsqueeze(0),
     )
 
@@ -142,7 +141,6 @@ class JacobianDataset(Dataset):
             sample["complete_training_sequence_ids"],
             self.tokenizer,
             self.model,
-            labels_ids=sample["labels_ids"],
             traj_position_indices=sample["traj_position_indices"],
         )
         self.cached_data_dict[i] = ret
