@@ -310,14 +310,20 @@ class CllmTrainer(Trainer):
         attn_mask = torch.ones(L, dtype=torch.long, device=input_ids.device)
         k_starts, l_starts = self._index_layout(prompt_len, T, N)
 
-        # cut post-EOS inside last_N block (the last last_j)
+        # cut post-EOS inside k_N & last_N block
         for j in range(T):
-            starting_pos = l_starts[j]
-            block = input_ids[starting_pos : starting_pos + N]
-            pos = (block == eos_id).nonzero(as_tuple=False)
+            starting_pos_k = k_starts[j]
+            starting_pos_l = l_starts[j]
+
+            block_k = input_ids[starting_pos_k : starting_pos_k + N]
+            block_l = input_ids[starting_pos_l : starting_pos_l + N]
+
+            pos = (block_l == eos_id).nonzero(as_tuple=False)
             if pos.numel():
-                first_eos_pos = starting_pos + int(pos[0])
-                attn_mask[first_eos_pos + 1 : starting_pos + N] = 0
+                first_eos_pos_k = starting_pos_k + int(pos[0])
+                first_eos_pos_l = starting_pos_l + int(pos[0])
+                attn_mask[first_eos_pos_k + 1 : starting_pos_k + N] = 0
+                attn_mask[first_eos_pos_l + 1 : starting_pos_l + N] = 0
         # mark PAD as 0 for attn_mask
         attn_mask[input_ids == pad_id] = 0
 
@@ -365,7 +371,11 @@ class CllmTrainer(Trainer):
             ls = l_starts[j]
 
             # first append bridging token
-            if j > 0:
+            if j == 0:
+                # map last token from prompt to first token in last_0
+                logit_pos = end_prompt - 1
+                target_pos = ls
+            elif j > 0:
                 prev_ls = l_starts[j - 1]
                 logit_pos = prev_ls + (N - 1)
                 target_pos = ls
@@ -455,7 +465,6 @@ class CllmTrainer(Trainer):
         else:
             sp = torch.cat(student_positions, dim=0)  # [K]
             tp = torch.cat(teacher_positions, dim=0)  # [K]
-
 
             # build global [L] padding mask: PADs and duplicate k_j prefixes
             global_pad_and_dup_mask = self._build_padding_mask_for_loss(input_ids, prompt_len, T)
