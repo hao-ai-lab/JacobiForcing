@@ -364,7 +364,7 @@ class CllmTrainer(Trainer):
 
         # Prompt segment
         end_prompt = prompt_len
-        add_forward_pairs(1, end_prompt)
+        add_forward_pairs(0, end_prompt)
 
         # for each j, we need an effective length ('end' from j-1) to compute first-token loss in last_j
         for j in range(T):
@@ -377,13 +377,14 @@ class CllmTrainer(Trainer):
                 target_pos = ls
             elif j > 0:
                 prev_ls = l_starts[j - 1]
+
                 logit_pos = prev_ls + (N - 1)
                 target_pos = ls
 
-                pair_logit_positions.append(torch.tensor([logit_pos], device=self.args.device))
-                pair_target_positions.append(torch.tensor([target_pos], device=self.args.device))
+            pair_logit_positions.append(torch.tensor([logit_pos], device=self.args.device))
+            pair_target_positions.append(torch.tensor([target_pos], device=self.args.device))
 
-            # handle block
+            # handle (k_j, last_j) block
             block = input_ids[ls : ls + N]
             # respect EOS inside the block
             eos_pos = None
@@ -442,6 +443,7 @@ class CllmTrainer(Trainer):
                 ar_targets,
                 reduction="mean",
                 label_smoothing=0.1,
+                ignore_index=-100,
             ) * 10
 
         # ========== Consistency loss ==========
@@ -485,7 +487,7 @@ class CllmTrainer(Trainer):
                 padding_mask
             )
 
-            loss_consistency = loss_consistency * (T_soft * T_soft)
+            loss_consistency = loss_consistency * (T_soft * T_soft) / T
 
         total_loss = loss_ar + loss_consistency
         if self.args.qlora:
