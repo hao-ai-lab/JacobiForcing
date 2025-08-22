@@ -116,7 +116,7 @@ class CllmTrainer(Trainer):
         l_start: int,
         N: int,
         eos_id: int | None,
-        drop_last_offset: bool = False,
+        drop_last_offset: bool = True,
     ) -> torch.Tensor:
         """
         Returns [N-1] bool if drop_last_offset else [N] bool.
@@ -184,23 +184,6 @@ class CllmTrainer(Trainer):
 
         return pos
     
-    def _flip_block_after_eos_to_pad(self, input_ids: torch.Tensor, start: int, N: int, eos_id: int | None, pad_id: int | None) -> int:
-        """Mutate input_ids[start:start+N] so that tokens AFTER first EOS become PAD.
-        Returns number of tokens flipped."""
-        if eos_id is None or pad_id is None:
-            return 0
-        block = input_ids[start:start+N]
-        pos = (block == eos_id).nonzero(as_tuple=False)
-        if pos.numel() == 0:
-            return 0
-        k = int(pos[0])                  # eos offset inside block
-        flip_start = start + k + 1
-        flip_end   = start + N
-        if flip_start < flip_end:
-            input_ids[flip_start:flip_end] = pad_id
-            return flip_end - flip_start
-        return 0
-    
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         if (~padding_mask).sum() == 0:
             return 0 * predicts[0][0]
@@ -217,6 +200,10 @@ class CllmTrainer(Trainer):
     #  - k_j queries: causal within *their own* k_j block + prompt
     #  - last_j queries: causal within *their own* last_j block + prompt
     def _build_block_mask(self, L: int, prompt_len: int, T: int, heads: int):
+        cache_key = (L, prompt_len, T, heads, "singlepass_prev-last-visible")
+        if cache_key in self._blockmask_cache:
+            return self._blockmask_cache[cache_key]
+
         N = self.max_new_tokens
         k_starts, l_starts = self._index_layout(prompt_len, T, N)
 
@@ -275,6 +262,7 @@ class CllmTrainer(Trainer):
         block_mask = create_block_mask(
             mask_mod, B=1, H=heads, Q_LEN=L, KV_LEN=L, device=self.args.device
         )
+        self._blockmask_cache[cache_key] = block_mask
         return block_mask
 
     def training_step(self, model, inputs, num_items_in_batch=None):
@@ -322,24 +310,20 @@ class CllmTrainer(Trainer):
         attn_mask = torch.ones(L, dtype=torch.long, device=input_ids.device)
         k_starts, l_starts = self._index_layout(prompt_len, T, N)
 
-        ### METHOD 1: PAD post-EOS TOKENS on last_N
-        self._flip_block_after_eos_to_pad(input_ids, l_starts[-1], N, eos_id, pad_id)
-        
-        ###-- METHOD 2: cut post-EOS inside k_N & last_N block
-        #--for j in range(T):
-        #--    starting_pos_k = k_starts[j]
-        #--    starting_pos_l = l_starts[j]
-        
-        #--    block_k = input_ids[starting_pos_k : starting_pos_k + N]
-        #--    block_l = input_ids[starting_pos_l : starting_pos_l + N]
+        # cut post-EOS inside k_N & last_N block
+        for j in range(T):
+            starting_pos_k = k_starts[j]
+            starting_pos_l = l_starts[j]
 
-        #--    pos = (block_l == eos_id).nonzero(as_tuple=False)
-        #--    if pos.numel():
-        #--        first_eos_pos_k = starting_pos_k + int(pos[0])
-        #--        first_eos_pos_l = starting_pos_l + int(pos[0])
-        #--        attn_mask[first_eos_pos_k + 1 : starting_pos_k + N] = 0
-        #--        attn_mask[first_eos_pos_l + 1 : starting_pos_l + N] = 0
-        
+            block_k = input_ids[starting_pos_k : starting_pos_k + N]
+            block_l = input_ids[starting_pos_l : starting_pos_l + N]
+
+            pos = (block_l == eos_id).nonzero(as_tuple=False)
+            if pos.numel():
+                first_eos_pos_k = starting_pos_k + int(pos[0])
+                first_eos_pos_l = starting_pos_l + int(pos[0])
+                attn_mask[first_eos_pos_k + 1 : starting_pos_k + N] = 0
+                attn_mask[first_eos_pos_l + 1 : starting_pos_l + N] = 0
         # mark PAD as 0 for attn_mask
         attn_mask[input_ids == pad_id] = 0
 
@@ -402,27 +386,22 @@ class CllmTrainer(Trainer):
 
             # handle (k_j, last_j) block
             block = input_ids[ls : ls + N]
-            
             # respect EOS inside the block
             eos_pos = None
             if eos_id is not None:
                 epos = torch.nonzero(block == eos_id, as_tuple=False)
                 eos_pos = int(epos[0]) if epos.numel() > 0 else None
-            
-            if eos_pos == 0:
-                continue
 
             end = N
-            #--if eos_pos is not None:
-            #--    end = min(end, eos_pos + 1)  # include EOS in segment
+            if eos_pos is not None:
+                end = min(end, eos_pos + 1)  # include EOS in segment
 
             #print(f"ending position for block {j}: {end}")
 
             # in-block forward pairs
             add_forward_pairs(ls, ls + end)
-            
-            #--if eos_pos is not None:
-            #--    break
+            if eos_pos is not None:
+                break
 
         # Bridges: (last_{j-1} last token logits) -> (first token of last_j)
         # Note: This skips the intervening k_j block
@@ -455,12 +434,10 @@ class CllmTrainer(Trainer):
 
             # ===== DEBUG PRINTING ===== #
             if self.args.local_rank == 0:
-
                 print(f"===== decoded last_N AR targets =====\n{self.processing_class.decode(ar_targets[-64:])}\n==========\n")
                 print(f"===== last_N AR tokens =====\n{ar_targets[-64:]}\n==========\n")
             # ===== DEBUG PRINTING ===== #
 
-            ar_targets[ar_targets == pad_id] = -100  # respect ignore_index
             loss_ar = F.cross_entropy(
                 ar_logits.float(),
                 ar_targets,
@@ -471,13 +448,13 @@ class CllmTrainer(Trainer):
 
         # ========== Consistency loss ==========
         T_soft = getattr(self.args, "distill_temperature", 1.0)
-        offs = torch.arange(N, device=self.args.device)
+        offs = torch.arange(N - 1, device=self.args.device)
 
         student_positions, teacher_positions = [], []
         for j in range(T):
             ks, ls = k_starts[j], l_starts[j]
             pair_keep = self._block_keep_mask_divergence_and_eos(
-                input_ids, ks, ls, N, eos_id=eos_id, drop_last_offset=False
+                input_ids, ks, ls, N, eos_id=eos_id, drop_last_offset=True
             )
             if pair_keep.any():
                 sp = ks + offs[pair_keep]
@@ -513,7 +490,6 @@ class CllmTrainer(Trainer):
             loss_consistency = loss_consistency * (T_soft * T_soft) / T
 
         total_loss = loss_ar + loss_consistency
-
         if self.args.qlora:
             total_loss.requires_grad = True
 
@@ -521,7 +497,7 @@ class CllmTrainer(Trainer):
             wandb.log({"ar loss": float(loss_ar.detach().cpu()),
                     "consistency loss": float(loss_consistency.detach().cpu())})
 
-        #del outputs, logits
+        del outputs, logits
         torch.cuda.empty_cache()
 
         with self.accelerator.accumulate(model):
