@@ -64,8 +64,8 @@ def process_one_sample(
     Return (data_id, entry) or None.
     Entry contains one (k_j,last_j) pair; final stitching happens later.
     """
-    data_id          = sample["data_id"]            # e.g. "data_123"
-    diffusion_itr_id = sample["diffusion_itr_id"]   # e.g. "itr_7"
+    data_id          = sample["data_id"]            # e.g., "data_123"
+    diffusion_itr_id = sample["diffusion_itr_id"]   # e.g., "itr_7"
     data_id_int      = parse_data_id_int(data_id)
     diffusion_itr    = parse_itr_int(diffusion_itr_id)
 
@@ -79,7 +79,7 @@ def process_one_sample(
     k_j = rng.randint(0, len(answer_traj) - 2)
 
     sampled_seq = answer_traj[k_j][-n_token_seq_length:]
-    fixed_seq   = answer_traj[-1][-n_token_seq_length:]
+    fixed_seq   = answer_traj[-1][-n_token_seq_length:]  # this is last_j
 
     pair_seq = list(sampled_seq) + list(fixed_seq)
     
@@ -89,8 +89,8 @@ def process_one_sample(
         prompt_ids=list(prompt_ids),
         pairs=[dict(
             diffusion_itr=int(diffusion_itr),  # for sorting
-            traj_position_index=int(k_j),
-            seq=pair_seq
+            # store the truncated last_j explicitly so we can build labels_ids later
+            last_seq=list(fixed_seq),
         )],
     )
     return data_id, entry
@@ -105,7 +105,7 @@ def merge_entry(existing: Dict[str, Any], new_entry: Dict[str, Any], verbose: bo
               f"(total pairs: {len(existing['pairs'])})")
 
 # -----------------------
-# SQLite helpers
+# SQLites
 # -----------------------
 def open_db(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=60)
@@ -194,9 +194,9 @@ def main():
     finally:
         pbar.close()
 
-    # -------- Final write-out with sorting --------
+    # Final write-out with sorting
     with open(args.output_path, "w", encoding="utf-8") as fout:
-        cur = cur = conn.execute("SELECT value FROM entries ORDER BY data_id_int")
+        cur = conn.execute("SELECT value FROM entries ORDER BY data_id_int")
         count = 0
 
         # across all data_id
@@ -206,21 +206,22 @@ def main():
             # Sort the (k_j,last_j) pairs by diffusion_itr (int)
             pairs_sorted = sorted(entry["pairs"], key=lambda p: p["diffusion_itr"])
 
-            # Flatten sequences
-            concatenated_pairs: List[int] = list(
-                itertools.chain.from_iterable(p["seq"] for p in pairs_sorted)
+            # Collect only the last_j sequences (as stored) for labels_ids
+            # If 'last_seq' is missing for any reason, fall back to the tail of seq.
+            labels_tail: List[int] = list(
+                itertools.chain.from_iterable(
+                    p["last_seq"] for p in pairs_sorted
+                )
             )
 
-            traj_position_indices: List[int] = list(
-                p["traj_position_index"] for p in pairs_sorted
-            )
+            prompt = entry["prompt_ids"][0]
 
             output_entry = dict(
                 data_id               = entry["data_id"],
-                prompt_ids            = entry["prompt_ids"][0],
-                complete_training_sequence_ids = entry["prompt_ids"][0] + concatenated_pairs,
-                prompt_ids_len = len(entry["prompt_ids"][0]),
-                traj_position_indices = traj_position_indices,
+                prompt_ids            = prompt,
+                # prompt + concat of all last_j (truncated) sequences
+                labels_ids            = prompt + labels_tail,
+                prompt_ids_len        = len(prompt),
             )
             fout.write(json.dumps(output_entry, ensure_ascii=False))
             fout.write("\n")

@@ -72,22 +72,20 @@ def main():
     ap.add_argument("-o", "--output", help="Path to output (defaults to *_filtered.json/.jsonl)")
     ap.add_argument("--model", default="/checkpoint/lhu/models/OpenThinker2-7B", help="Tokenizer path")
     ap.add_argument("--field", default=Field, help="Field containing IDs or text")
-    ap.add_argument("--threshold", type=int, default=14336, help="Max allowed tokens (strictly > is dropped)")
+    ap.add_argument("--threshold", type=int, default=20480, help="Max allowed tokens (strictly > is dropped)")
     args = ap.parse_args()
 
     in_path = args.input
     if not os.path.exists(in_path):
         print(f"Input not found: {in_path}", file=sys.stderr)
         sys.exit(1)
-
-    # Derive output path if not provided
     if args.output:
         out_path = args.output
     else:
         base, ext = os.path.splitext(in_path)
         if ext == ".gz":
             base2, ext2 = os.path.splitext(base)
-            ext = ext2 + ext  # e.g., .jsonl.gz
+            ext = ext2 + ext
             base = base2
         out_path = f"{base}_filtered{ext or '.json'}"
 

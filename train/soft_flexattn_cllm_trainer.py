@@ -16,6 +16,7 @@ class CllmTrainer(Trainer):
     def __init__(self, *args,  accelerator=None, optimizer=None, lr_scheduler=None, train_dataloader=None, **kwargs):
         super().__init__(*args, **kwargs)
         args = kwargs["args"]
+
         self.accelerator = accelerator
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
@@ -116,7 +117,7 @@ class CllmTrainer(Trainer):
         l_start: int,
         N: int,
         eos_id: int | None,
-        drop_last_offset: bool = False,
+        drop_last_offset: bool = True,
     ) -> torch.Tensor:
         """
         Returns [N-1] bool if drop_last_offset else [N] bool.
@@ -213,9 +214,9 @@ class CllmTrainer(Trainer):
         return mean_entropy
 
     # FlexAttention BlockMask
-    #  - prompt queries: causal within prompt
-    #  - k_j queries: causal within *their own* k_j block + prompt
-    #  - last_j queries: causal within *their own* last_j block + prompt
+    # - prompt queries: causal within prompt
+    # - k_j queries: causal within *their own* k_j block + prompt
+    # - last_j queries: causal within *their own* last_j block + prompt
     def _build_block_mask(self, L: int, prompt_len: int, T: int, heads: int):
         N = self.max_new_tokens
         k_starts, l_starts = self._index_layout(prompt_len, T, N)
@@ -224,7 +225,7 @@ class CllmTrainer(Trainer):
         ls = torch.tensor(l_starts, device=self.args.device)
 
         def mask_mod(b, h, q, k):
-            # q, k: any shape, torch tensors
+            # q, k: query, key, torch tensors
             rel_q = q - prompt_len
             rel_k = k - prompt_len
             block_idx_q = torch.div(rel_q, N, rounding_mode="floor")
@@ -247,17 +248,21 @@ class CllmTrainer(Trainer):
 
             # queries attended to all previous last_* blocks.
             # This makes every last_j visible to all future k_{j+i} and last_{j+i}.
+            # 2 * j_q: max previous block index
             k_in_prev_last = is_lastj_k & (block_idx_k < 2 * j_q)
 
-            # Prompt is always causal
+            # prompt is always causal
             mask_prompt = is_prompt_q & (k <= q)
 
             # prompt (causal) + same k_j block (causal)
             # attended to last_* blocks
             same_kj_block = is_kj_q & is_kj_k & (block_idx_q == block_idx_k)
             mask_kj = is_kj_q & (
-                (is_prompt_k & (k <= q)) |
+                # attends to the prompt
+                is_prompt_k |
+                # attends to all previous last_{j-1}
                 k_in_prev_last |
+                # attends causally within its own block
                 (same_kj_block & (k >= ks_per_q) & (k <= q))
             )
 
@@ -265,15 +270,18 @@ class CllmTrainer(Trainer):
             # attended to last_* blocks
             same_lastj_block = is_lastj_q & is_lastj_k & (block_idx_q == block_idx_k)
             mask_lastj = is_lastj_q & (
-                (is_prompt_k & (k <= q)) |
+                # attends to the prompt
+                is_prompt_k |
+                # attends to all previous last_{j-1}
                 k_in_prev_last |
+                # attends causally within its own block
                 (same_lastj_block & (k >= ls_per_q) & (k <= q))
             )
 
             return mask_prompt | mask_kj | mask_lastj
 
         block_mask = create_block_mask(
-            mask_mod, B=1, H=heads, Q_LEN=L, KV_LEN=L, device=self.args.device
+            mask_mod, B=1, H=heads, Q_LEN=L, KV_LEN=L, device=self.args.device, _compile=True,
         )
         return block_mask
 
@@ -339,23 +347,30 @@ class CllmTrainer(Trainer):
         #--        first_eos_pos_l = starting_pos_l + int(pos[0])
         #--        attn_mask[first_eos_pos_k + 1 : starting_pos_k + N] = 0
         #--        attn_mask[first_eos_pos_l + 1 : starting_pos_l + N] = 0
-        
-        # mark PAD as 0 for attn_mask
-        attn_mask[input_ids == pad_id] = 0
 
         # Build structural block mask
         num_heads = getattr(self.cfg, 'num_attention_heads', 28)
         #print(f"num heads from config: {self.cfg.num_attention_heads}")
         #print(f"[block mask] num_heads={num_heads}, L={L}, prompt_len={prompt_len}, T={T}, N={N}")
         blk_mask = self._build_block_mask(L, prompt_len, T, num_heads)
-
         # shared position ids for each (k_j, last_j) pair
         position_ids = self._build_shared_position_ids(L, prompt_len, T)
 
+        # ---- DEBUG: mask + positions sanity checks ----
+        #-if (self.args.local_rank in (-1, 0)) and self.debug_masks and (self.train_step_cnt % self.debug_every == 0):
+        #-    with torch.no_grad():
+        #-        # Invariants of your current flex pattern
+        #-        self._assert_invariants(blk_mask, prompt_len, N, T, L)
+        #-        # RoPE positions are shared within each (k_j, last_j) pair
+        #-        self._check_shared_positions(position_ids, prompt_len, T)
+                # Human-readable peek
+        #-        self._dump_visibility(blk_mask, prompt_len, N, T, L, max_rows=3)
+        # -----------------------------------------------
+
         outputs = model(
             input_ids=input_ids.unsqueeze(0),
-            attention_mask=attn_mask.unsqueeze(0),
-            block_mask=blk_mask,
+            attention_mask=blk_mask,
+            #block_mask=blk_mask,
             position_ids=position_ids.unsqueeze(0),
             attn_implementation="flex_attention",
         )
@@ -370,13 +385,12 @@ class CllmTrainer(Trainer):
         def add_forward_pairs(seg_start: int, seg_end: int):
             """
             Add all in-block next-token pairs for a segment [seg_start, seg_end).
-            Produces pairs (p -> p+1) for p in [seg_start .. seg_end-2].
+            Produces pairs (p --> p+1) for p in [seg_start .. seg_end-2].
             """
-            if seg_end - seg_start > 1:
-                p = torch.arange(seg_start, seg_end - 1, device=self.args.device, dtype=torch.long)
-                t = p + 1
-                pair_logit_positions.append(p)
-                pair_target_positions.append(t)
+            p = torch.arange(seg_start, seg_end - 1, device=self.args.device, dtype=torch.long)
+            t = p + 1
+            pair_logit_positions.append(p)
+            pair_target_positions.append(t)
 
         # Prompt segment
         end_prompt = prompt_len
@@ -393,7 +407,6 @@ class CllmTrainer(Trainer):
                 target_pos = ls
             elif j > 0:
                 prev_ls = l_starts[j - 1]
-
                 logit_pos = prev_ls + (N - 1)
                 target_pos = ls
 
@@ -402,25 +415,27 @@ class CllmTrainer(Trainer):
 
             # handle (k_j, last_j) block
             block = input_ids[ls : ls + N]
-            
+
             # respect EOS inside the block
             eos_pos = None
             if eos_id is not None:
                 epos = torch.nonzero(block == eos_id, as_tuple=False)
                 eos_pos = int(epos[0]) if epos.numel() > 0 else None
-            
-            if eos_pos == 0:
-                continue
 
             end = N
-            #--if eos_pos is not None:
-            #--    end = min(end, eos_pos + 1)  # include EOS in segment
+            if eos_pos is not None:
+                end = min(end, eos_pos + 1)  # include EOS in segment
+                
+                # mark PAD as 0 for attn_mask
+                mask_block = attn_mask[ls : ls + N]
+                mask_block[block == pad_id] = 0
+                attn_mask[ls : ls + N] = mask_block
 
             #print(f"ending position for block {j}: {end}")
 
             # in-block forward pairs
             add_forward_pairs(ls, ls + end)
-            
+
             #--if eos_pos is not None:
             #--    break
 
@@ -452,15 +467,32 @@ class CllmTrainer(Trainer):
 
             ar_logits  = logits[0, p_all, :].clone()                          # [K, V]
             ar_targets = input_ids.index_select(0, t_all).clone().detach()    # [K]
-
+            
             # ===== DEBUG PRINTING ===== #
             if self.args.local_rank == 0:
-
                 print(f"===== decoded last_N AR targets =====\n{self.processing_class.decode(ar_targets[-64:])}\n==========\n")
                 print(f"===== last_N AR tokens =====\n{ar_targets[-64:]}\n==========\n")
             # ===== DEBUG PRINTING ===== #
 
             ar_targets[ar_targets == pad_id] = -100  # respect ignore_index
+
+            max_values, max_indices = ar_logits.max(dim=-1)
+            #print(f"\ninput ids: {input_ids.tolist()}")
+
+            #print(f"\nlabels length: {len(max_values)}")
+            #print(f"\nargmax length: {len(max_indices)}")
+            #print("\nmax logits:", max_values.tolist())
+            #print("\nargmax indices:", max_indices.tolist())
+
+            #print(f"\nattention mask length: {len(attn_mask.tolist())}")
+            #print(f"\nattention mask: {attn_mask.tolist()}")
+            #print(f"block attention mask blk_mask: {blk_mask}")
+
+            #print(f"\nprompt length: {prompt_len}")
+            #print(f"\nEOS position offset: {eos_pos}")
+            #print(f"\ngeneration max logits: {max_values[prompt_len:].tolist()}")
+            #print(f"generation indices: {max_indices[prompt_len:].tolist()}")
+
             loss_ar = F.cross_entropy(
                 ar_logits.float(),
                 ar_targets,
@@ -471,13 +503,18 @@ class CllmTrainer(Trainer):
 
         # ========== Consistency loss ==========
         T_soft = getattr(self.args, "distill_temperature", 1.0)
-        offs = torch.arange(N, device=self.args.device)
+
+        drop_last_offset = True
+        if drop_last_offset:
+            offs = torch.arange(N - 1, device=self.args.device)
+        else:
+            offs = torch.arange(N, device=self.args.device)
 
         student_positions, teacher_positions = [], []
         for j in range(T):
             ks, ls = k_starts[j], l_starts[j]
             pair_keep = self._block_keep_mask_divergence_and_eos(
-                input_ids, ks, ls, N, eos_id=eos_id, drop_last_offset=False
+                input_ids, ks, ls, N, eos_id=eos_id, drop_last_offset=drop_last_offset
             )
             if pair_keep.any():
                 sp = ks + offs[pair_keep]

@@ -241,7 +241,7 @@ def train():
     train_dataloader = DataLoader(
         data_module["train_dataset"],
         batch_size=per_device_bs,
-        shuffle=True,
+        shuffle=False,
         num_workers=training_args.dataloader_num_workers,
         pin_memory=True,
         drop_last=False,

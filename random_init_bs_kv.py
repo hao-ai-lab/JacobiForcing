@@ -77,7 +77,8 @@ data = []
 df = pd.read_parquet("/checkpoint/lhu/data/OpenThoughts-114k/data/train-00000-of-00006.parquet")
 data = df.head(100).to_dict(orient="records")
 
-model_name = "/checkpoint/lhu/train_ckpts/cllm/one-pass-efficient-train-cllm-openthinker2-7B-ntok32-eos_tokens-without_think_format_split_ratio_40_size_2848_ntok_64_sampling_ratio_1_lookup_size_640_cllm_soft_loss_length_capped_16k_flexattn/hf_merged"
+model_name = "/checkpoint/lhu/train_ckpts/cllm/verify-8-23-openthinker2-7B-ntok64_cllm_soft_loss_length_capped_total_length_20k_flexattn_all_data_v1_4k_sample_ar_10_clone_detached/hf_merged_step_500"
+#model_name = "/checkpoint/lhu/train_ckpts/cllm/verify-8-23-openthinker2-7B-ntok64_cllm_soft_loss_length_capped_16k_flexattn_all_data_v1_ar_1_ar_only_label_smooth_0p1/hf_merged_step_500"
 
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
@@ -85,7 +86,7 @@ model = Qwen2ForCausalLM.from_pretrained(
     torch_dtype=torch.bfloat16, 
     attn_implementation="flash_attention_2"
 )
-tokenizer = AutoTokenizer.from_pretrained("/code/users/lhu/models/OpenThinker2-7B")
+tokenizer = AutoTokenizer.from_pretrained("/checkpoint/lhu/models/OpenThinker2-7B")
 tokenizer.padding_side = "left"
 
 #TODOs: Check if this is okay
@@ -156,12 +157,12 @@ while True:
             use_cache=True,
             prefill_phase=prefill_phase,
             n_token_seq_len=n_token_seq_len,
-            temperature = 1.0,
+            temperature = 0.9,
             top_p = 0.9, 
-            top_k = None,
-            repetition_penalty = None, 
+            top_k = 20,
+            repetition_penalty = 1.2, 
             lenience = 1.,
-            accept_threshold = 0.99,
+            accept_threshold = 0.15,
             tokenizer=tokenizer,
             )
         prefill_phase=False
@@ -175,14 +176,14 @@ while True:
             use_cache=True,
             prefill_phase=prefill_phase,
             n_token_seq_len=n_token_seq_len,
-            temperature = 1.0,
-            top_p = 0.9,
-            top_k = None,
-            repetition_penalty = None, 
+            temperature = 0.9,
+            top_p = 0.9, 
+            top_k = 20,
+            repetition_penalty = 1.2, 
             lenience = 1.,
-            accept_threshold = 0.99,
+            accept_threshold = 0.15,
             tokenizer=tokenizer,
-            )
+        )
     
         input_ids = generated_ids
         attention_mask = make_left_pad_attention_mask(input_ids, tokenizer.pad_token_id).to(model.device)

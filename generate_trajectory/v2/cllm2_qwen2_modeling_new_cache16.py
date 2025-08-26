@@ -70,7 +70,8 @@ DynamicCache.delete_false_key_value = delete_false_key_value
 def empty_like(cls, other: "DynamicCache") -> "DynamicCache":
     
     new_cache = cls()
-    shape = (other.key_cache[0].shape[0], other.key_cache[0].shape[1], other.key_cache[0].shape[2]+65, other.key_cache[0].shape[3])
+    # TODO: make cache size configurable
+    shape = (other.key_cache[0].shape[0], other.key_cache[0].shape[1], other.key_cache[0].shape[2]+17, other.key_cache[0].shape[3])
     new_cache.key_cache = [
     torch.zeros(shape, device=other.key_cache[0].device, dtype=other.key_cache[0].dtype)
     for _ in range(len(other.key_cache))
@@ -457,7 +458,6 @@ def get_diffusion_decoding_trajectory(
         past_key_values_fin = DynamicCache.empty_like(past_key_values)
 
         while True:
-
             ### 1) Group input by convergence & Use only unconverged samples
             idx_unfin = unfinished_mask.nonzero(as_tuple=False).squeeze(1)
             out_unfin = out[idx_unfin]

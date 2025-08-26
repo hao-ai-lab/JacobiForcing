@@ -24,21 +24,31 @@ from transformers.generation.logits_process import (
 )
 
 import re
-
 from transformers.cache_utils import DynamicCache
 
-from cllm2_qwen2_modeling import diffusion_forward
+from pathlib import Path
+path_root = Path(__file__).parents[1]
+sys.path.append(str(path_root))
 
-Qwen2ForCausalLM.diffusion_forward = diffusion_forward
+from cllm2_qwen2_modeling_new import get_diffusion_decoding_trajectory
+
+Qwen2ForCausalLM.get_diffusion_decoding_trajectory = get_diffusion_decoding_trajectory
 
 # UTILS
 def load_prompt_list(filename, start=0, end=None):
     with open(filename, "r", encoding="utf-8") as f:
-        prompts = json.load(f)
-    if not isinstance(prompts, list):
-        raise ValueError(f"Expected JSON array in {filename}")
-    end = len(prompts) if end is None else min(end, len(prompts))
-    return prompts[start:end]
+        data_dict = json.load(f)
+    if not isinstance(data_dict, dict):
+        raise ValueError(f"Expected JSON object in {filename}")
+
+    # Optionally filter the data_dict here
+
+    end = len(data_dict) if end is None else min(end, len(data_dict))
+    selected_data = data_dict[start:end]
+    prompt_list = []
+    for data in selected_data:
+        prompt_list.append(data["input"])
+    return prompt_list
 
 def trim_left_padding(input_ids: torch.Tensor, pad_token_id: int) -> torch.Tensor:
     assert input_ids.dim() == 2 and input_ids.size(0) == 1
@@ -71,14 +81,15 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len,
         print(f"Warning: Could not parse bucket ID from filename '{filename}'. Using 'unknown'.")
         bucket_id = "unknown"
     
-    data = load_prompt_list(filename, start=0, end=5000)
-    data_eos_id = min(len(data), data_eos_id)
+    # fixed to 0~25000 to initially load all data
+    data = load_prompt_list(filename, start=0, end=25000)
+    data_eos_id = min(len(data), int(data_eos_id))
     new_data = []
 
     for start_idx in tqdm(range(int(data_bos_id), int(data_eos_id), batch_size)):
         end_idx = min(start_idx + batch_size, int(data_eos_id))
         batch_indices = torch.arange(start_idx, end_idx, device=model.device)
-    
+
         print(f"\nProcessing batch from {start_idx} to {end_idx}...\n")
 
         prompts = [
@@ -135,26 +146,41 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len,
             iterations_active = iterations[still_active]
 
             print(f'performing diffusion decoding for iterations: {iterations_active}', flush=True)
-            diffusion_trajectory_ids_active, past_key_values_active = model.diffusion_forward(
-                input_ids=input_ids_active,
-                attention_mask=attn_mask_active,
-                past_key_values=past_key_values_active,
-                use_cache=True,
-                prefill_phase=prefill_phase,
-                n_token_seq_len=n_token_seq_len,
-                temperature = 1.0,
-                top_p = 0.9,
-                top_k = None,
-                repetition_penalty = None, 
-                lenience = 1.,
-                accept_threshold = 0.99,
-                tokenizer=tokenizer,
-            )
-            print(f'finishing diffusion decoding...', flush=True)
             if prefill_phase:
+                past_key_values_active = model.get_diffusion_decoding_trajectory(
+                    input_ids=input_ids_active,
+                    attention_mask=attn_mask_active,
+                    past_key_values=past_key_values_active,
+                    use_cache=True,
+                    prefill_phase=prefill_phase,
+                    n_token_seq_len=n_token_seq_len,
+                    temperature = 1.0,
+                    top_p = 0.9,
+                    top_k = None,
+                    repetition_penalty = None, 
+                    lenience = 1.,
+                    accept_threshold = 0.99,
+                    tokenizer=tokenizer,
+                )
                 print(f'finishing prefilling...', flush=True)
                 prefill_phase = False
                 continue
+            else:
+                diffusion_trajectory_ids_active, past_key_values_active = model.get_diffusion_decoding_trajectory(
+                    input_ids=input_ids_active,
+                    attention_mask=attn_mask_active,
+                    past_key_values=past_key_values_active,
+                    use_cache=True,
+                    prefill_phase=prefill_phase,
+                    n_token_seq_len=n_token_seq_len,
+                    temperature = 1.0,
+                    top_p = 0.9,
+                    top_k = None,
+                    repetition_penalty = None, 
+                    lenience = 1.,
+                    accept_threshold = 0.99,
+                    tokenizer=tokenizer,
+                )
 
             next_input_ids = []
             for n, idx in enumerate(batch_indices_active):
@@ -173,9 +199,8 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len,
             input_ids = torch.stack(next_input_ids, dim=0)
             batch_indices = batch_indices_active
             iterations = iterations_active
-            
-            #print(f"converged sub-sequence count: {iterations}", flush=True)
 
+        print(f'finishing diffusion decoding...', flush=True)
         grouped_by_data_id = defaultdict(list)
         for dic in dict_lst:
             grouped_by_data_id[dic["data_id"]].append(dic)
@@ -190,13 +215,12 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len,
                 dic["teacher_output_ids"] = dic["teacher_output_ids"].tolist()
                 new_data.append(dic)
 
-    print("Diffusion trajectory has been collected.")
-    os.makedirs(save_path, exist_ok=True)
-    new_file_name = f"{Path(filename).stem}_jacobi_len{n_token_seq_len}_labels_{use_labels}_maxlen{max_new_seq_len}_{data_bos_id}_{data_eos_id}.json"
-    new_file_path = os.path.join(save_path, new_file_name)
-
-    with open(new_file_path, "w") as f:
-        json.dump(new_data, f)
+        os.makedirs(save_path, exist_ok=True)
+        new_file_name = f"{Path(filename).stem}_jacobi_len{n_token_seq_len}_labels_{use_labels}_maxlen{max_new_seq_len}_{data_bos_id}_{data_eos_id}.json"
+        new_file_path = os.path.join(save_path, new_file_name)
+    
+        with open(new_file_path, "w") as f:
+            json.dump(new_data, f)
 
 # ---------------- ENTRY -----------------
 if __name__ == "__main__":
