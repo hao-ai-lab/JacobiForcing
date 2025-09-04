@@ -67,10 +67,8 @@ six==1.17.0
 smmap==5.0.2
 sympy==1.14.0
 tokenizers==0.21.2
-torch==2.7.1
 tqdm==4.67.1
 transformers==4.53.0
-triton==3.3.1
 typing-inspection==0.4.1
 typing_extensions==4.14.0
 tzdata==2025.2
@@ -80,5 +78,3 @@ wcwidth==0.2.13
 xxhash==3.5.0
 yarl==1.20.1
 orjson
-matplotlib
-https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.5cxx11abiTRUE-cp310-cp310-linux_x86_64.whl

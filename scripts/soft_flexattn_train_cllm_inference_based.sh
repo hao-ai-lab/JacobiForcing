@@ -27,7 +27,7 @@ torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 \
     --save_strategy "steps" \
     --save_steps 500 \
     --save_total_limit 2 \
-    --learning_rate 2e-5 \
+    --learning_rate 5e-6 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \

@@ -26,6 +26,8 @@ def read_jsonl(path):
                 yield json.loads(line)
             except json.JSONDecodeError as e:
                 sys.stderr.write(f"[warn] Skipping invalid JSON on line {lineno}: {e}\n")
+        
+        print(f"total read size: {lineno}")
 
 def write_jsonl(path, items):
     with open(path, "w", encoding="utf-8") as f:
@@ -64,8 +66,10 @@ def main():
     p.add_argument("-n", "--size", type=int, required=True, help="Target number of records.")
     p.add_argument("--method", choices=["random", "first"], default="random", help="Sampling method.")
     p.add_argument("--seed", type=int, default=None, help="Random seed (for --method random).")
-    p.add_argument("--output-format", choices=["jsonl", "json"], default="jsonl",
-                   help="Output format (default: jsonl).")
+    p.add_argument("--output-format",
+                    choices=["jsonl", "json"],
+                    default="jsonl",
+                    help="Output format (default: jsonl).")
     args = p.parse_args()
 
     if args.size <= 0:
