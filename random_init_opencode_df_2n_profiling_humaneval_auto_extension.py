@@ -34,6 +34,10 @@ def find_first_true_index(bool_tensor, dim=-1):
 def _next_multiple_of(x, base=16):
     return ((x + base - 1) // base) * base
 
+def _next_multiple_of_strict(x, base=16):
+    # Always the NEXT multiple (strictly greater than x)
+    return ((x + base) // base) * base
+
 def find_first_true_index(bool_tensor, dim=-1):
     return (bool_tensor.cumsum(dim=dim) == 0).sum(dim=dim)
 
@@ -52,18 +56,18 @@ def diffusion_decoding(
     accept_threshold=0.8,
     confidence_threshold=0.4,
     window_size=4,
-    lookahead_size=16,  # NEW: default lookahead; monitor Tb + lookahead ± window, capped to 2*N
+    lookahead_size=16,  # monitor Tb + lookahead ± window; do not monitor beyond 2*N
 ):
     """
     Diffusion-like decoding with dynamic variable-size blocks.
 
-    Changes in this version:
     - Start with a single block of size 2*n_token_seq_len.
     - Monitoring region is centered at (current_converged_index Tb + lookahead_size) ± window_size,
       but never beyond 2*n_token_seq_len within the block.
     - Spawn (split) a new block only if the split guarantees concurrency:
-      choose split_at > Tb (so left block keeps unfinished draft) and split_at < Lb
-      (so right block also has unfinished draft).
+      choose split_at > Tb (left keeps draft) and split_at < Lb (right keeps draft).
+    - After spawning, extend only the new right block to the closest NEXT multiple of 16
+      (strictly larger than its current size) using random-from-context initialization.
     """
     batch = 1
     prompt_len = int(torch.sum(attention_mask[0]))
@@ -76,7 +80,7 @@ def diffusion_decoding(
     initial_block_size = 2 * n_token_seq_len
     vocab_size = len(tokenizer)
 
-    # Append 2*N draft tokens (random from prompt tokens for parity with original)
+    # Append 2*N draft tokens (random from prompt tokens)
     q_sampled_init, q_logits_init = [], []
     for _ in range(initial_block_size):
         q_sample = torch.tensor([random.choice(input_ids[0].tolist())],
@@ -213,7 +217,7 @@ def diffusion_decoding(
             first_token_confidence = torch.max(last_prob_next[0]).item()
             confidence_of_first_token.append(first_token_confidence)
 
-        min_iteration_thresholding_count = 2
+        min_iteration_thresholding_count = 3
         accumulative_thresholding_count = 2
         spawn_gate = (
             len(confidence_of_first_token) >= min_iteration_thresholding_count and
@@ -299,17 +303,20 @@ def diffusion_decoding(
                         iteration_all_blocks.insert(b + 1, 0)
                         num_blocks += 1
 
-                        # Now extend the *new right block* so that total drafted length is next multiple of 16
-                        total_len_now = sum(block_sizes)
-                        target_total = _next_multiple_of(total_len_now, 16)
-                        delta_extend = target_total - total_len_now
+                        # -------- NEW: extend ONLY the new right block to the closest NEXT multiple of 16 --------
+                        # Strictly increase the size of the newly spawned block (b+1)
+                        right_idx = b + 1
+                        right_curr = block_sizes[right_idx]
+                        target_right = _next_multiple_of_strict(right_curr, 16)
+                        delta_extend = target_right - right_curr
+
                         if delta_extend > 0:
-                            # Append delta draft tokens to the rightmost block (b+1)
                             extend_tokens, extend_logits = [], []
                             for _ in range(delta_extend):
                                 t = torch.tensor([random.choice(input_ids[0].tolist())],
                                                  dtype=torch.long, device=device).unsqueeze(0)
-                                out = torch.cat((out, t), dim=1)  # keep parity with original behavior
+                                # Grow global 'out' for parity with original behavior
+                                out = torch.cat((out, t), dim=1)
                                 lg = torch.full((1, vocab_size), float("-inf"), device=device)
                                 lg.scatter_(1, t, 0.0)
                                 extend_tokens.append(t)
@@ -317,15 +324,16 @@ def diffusion_decoding(
                             if extend_tokens:
                                 ext_samp = torch.cat(extend_tokens, dim=1)          # [1, delta]
                                 ext_log  = torch.stack(extend_logits, dim=-2)       # [1, delta, V]
-                                q_sampled_all_blocks[b + 1] = torch.cat((q_sampled_all_blocks[b + 1], ext_samp), dim=1)
-                                q_logits_all_blocks[b + 1]  = torch.cat((q_logits_all_blocks[b + 1],  ext_log), dim=1)
-                                block_sizes[b + 1] += delta_extend
+                                q_sampled_all_blocks[right_idx] = torch.cat((q_sampled_all_blocks[right_idx], ext_samp), dim=1)
+                                q_logits_all_blocks[right_idx]  = torch.cat((q_logits_all_blocks[right_idx],  ext_log), dim=1)
+                                block_sizes[right_idx] += delta_extend
+                        # -----------------------------------------------------------------------------------------
 
                         # Reset the gate tracker after a split
                         confidence_of_first_token = []
 
         # -----------------------------
-        # Early finish check (moved AFTER split logic)
+        # Early finish check (after split logic)
         # -----------------------------
         if all_done():
             # Use last_prob_next from the last visited block
@@ -382,7 +390,7 @@ def main():
     repetition_penalty = 1.2
     lenience = 1.0
     accept_threshold = 0.1
-    confidence_threshold = 0.5
+    confidence_threshold = 0.8
 
     # Safety caps
     max_new_tokens = 1024
@@ -475,8 +483,7 @@ def main():
                 lenience=lenience,
                 accept_threshold=accept_threshold,
                 confidence_threshold=confidence_threshold,
-                # window_size kept default in this example
-                # lookahead_size kept default (16); can be overridden here if desired
+                # window_size and lookahead_size left as defaults; override if desired
             )
 
             iters.append(itr_count)

@@ -142,7 +142,7 @@ def run_batch(task_ids, prompts):
             "prompt_tokens": int(eff_lens[i].item()),
             "new_tokens": 0,
             "calls": 0,
-            "total_iterations": 0.0,
+            "total_iterations": 0,
             "iter_entries": 0,
             "time_start": time.perf_counter(),
             "time_sec": 0.0,
@@ -239,7 +239,7 @@ def run_batch(task_ids, prompts):
             orig = int(active_to_orig[k].item())
             stats[orig]["calls"] += 1
             if itr is not None:
-                stats[orig]["total_iterations"] += itr
+                stats[orig]["total_iterations"] += (itr + 1)
                 stats[orig]["iter_entries"] += 1
 
         # Update lengths
