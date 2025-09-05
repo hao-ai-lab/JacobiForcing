@@ -50,8 +50,6 @@ def diffusion_decoding(
     confidence_threshold=0.4,
     window_size=4,
     lookahead_size=16,
-    min_iteration_thresholding_count=3,
-    accumulative_thresholding_count=2,
 ):
     """
     Diffusion-like decoding with dynamic variable-size blocks.
@@ -72,10 +70,12 @@ def diffusion_decoding(
     # Use the model vocab size consistently for logits
     model_vocab_size = int(getattr(model.config, "vocab_size"))
 
-    # Init draft to length 2 * N
+    # -----------------------------
+    # Init draft to length 2*N
+    # -----------------------------
     initial_block_size = 2 * n_token_seq_len
 
-    # Append 2 * N draft tokens (random from prompt tokens)
+    # Append 2*N draft tokens (random from prompt tokens)
     q_sampled_init, q_logits_init = [], []
     for _ in range(initial_block_size):
         q_sample = torch.tensor([random.choice(input_ids[0].tolist())],
@@ -116,47 +116,46 @@ def diffusion_decoding(
             s += L
         return starts
 
-    iter_count = 0
-    
-    # Track per-iteration window gate results for the current last-incomplete block
-    window_gate_history = []
-    history_for_block = None
+    confidence_of_first_token = []   # track prob of the "next token" at tail
+    iter_count = 0                   # global forward-pass counter
 
+    # -----------------------------
+    # Main loop
+    # -----------------------------
     def all_done():
-        nb = len(block_sizes)
-        return all(total_accepted_all_blocks[b] >= block_sizes[b] for b in range(nb))
+        return all(total_accepted_all_blocks[b] >= block_sizes[b] for b in range(num_blocks))
 
     while not all_done():
+        # One verify/speculate pass = one global iteration
         out_attention_mask = torch.full_like(out, 1).to(device)
         logits = model(out, out_attention_mask).logits
         iter_count += 1
 
         starts = block_starts()
 
-        # Cache per-block top-1 confidences (by position) for this iteration
-        block_top1_confs = {}
+        # Track the "prob_next" for the last (current) block for confidence signal
         last_prob_next = None
 
-        # verify & speculate over each block
-        for block_id in range(len(block_sizes)):
+        for block_id in range(num_blocks):
             Lb = block_sizes[block_id]
             Tb = total_accepted_all_blocks[block_id]
             if Tb >= Lb:
-                continue
+                continue  # this block is already converged
 
             b_start = starts[block_id]
+            # Slice logits for this block: [prompt + accepted-1 ... prompt + b_start + Lb]
             p_logits_per_block = logits[:, prompt_len + b_start + Tb - 1 : prompt_len + b_start + Lb, :]
             q_logits_per_block = q_logits_all_blocks[block_id]
 
+            # Apply processors
             p_scores = logits_processors(out, p_logits_per_block.squeeze(0)).unsqueeze(0)
             q_scores = logits_processors(out, q_logits_per_block.squeeze(0)).unsqueeze(0)
 
+            # Softmax
             p_prob = torch.softmax(p_scores, dim=-1)
             q_prob = torch.softmax(q_scores, dim=-1)
 
-            last_prob_next = p_prob[:, -1]
-
-            # apply two-condition acceptance rule
+            # Compare to draft
             p, prob_next = p_prob[:, :-1], p_prob[:, -1]
             p = p.gather(-1, q_sampled_all_blocks[block_id].unsqueeze(-1))
             q = q_prob.gather(-1, q_sampled_all_blocks[block_id].unsqueeze(-1)) * lenience
@@ -164,14 +163,18 @@ def diffusion_decoding(
 
             r = torch.zeros_like(q).float().uniform_(0, 1)
             threshold = torch.ones_like(q).float() * accept_threshold
+
             accepted = find_first_true_index((r > (p / q)) | (p < threshold))
             num_accepted = int(accepted[0])
 
+            # Apply acceptances
             total_accepted_all_blocks[block_id] += num_accepted
             out_accepted_all_blocks[block_id] = out[:, prompt_len + b_start :
                                                        prompt_len + b_start + total_accepted_all_blocks[block_id]]
+
             has_rejected = (num_accepted < q.shape[1])
 
+            # Worst-case extra token when zero accepted
             sample_additional_token = False
             if num_accepted == 0:
                 next_token = torch.multinomial(p_prob[:, num_accepted, :], num_samples=1)
@@ -182,6 +185,10 @@ def diffusion_decoding(
             print(f'[global_iter={iter_count}] block={block_id} '
                   f'accepted_total={total_accepted_all_blocks[block_id]} / {Lb}')
 
+            # If this was the last block we touched, remember prob_next for spawn signal
+            last_prob_next = prob_next
+
+            # Refresh the block's draft tail if there was a rejection
             if has_rejected:
                 if sample_additional_token:
                     q_logits_all_blocks[block_id] = p_logits_per_block[:, num_accepted + 1 : -1, :]
@@ -192,65 +199,44 @@ def diffusion_decoding(
 
             iteration_all_blocks[block_id] += 1
 
-            # Cache top-1 confidence per position for this block
-            top1_conf_vec = p_prob.max(dim=-1).values.squeeze(0)  # [Lb - Tb + 1]
-            block_top1_confs[block_id] = (top1_conf_vec, Tb, Lb)
+        # Splitting heuristic
+        if last_prob_next is not None:
+            first_token_confidence = torch.max(last_prob_next[0]).item()
+            confidence_of_first_token.append(first_token_confidence)
 
-        # ----- window-based split gating with history -----
+        min_iteration_thresholding_count = 3
+        accumulative_thresholding_count = 2
+        spawn_gate = (
+            len(confidence_of_first_token) >= min_iteration_thresholding_count and
+            all(c > confidence_threshold for c in confidence_of_first_token[-accumulative_thresholding_count:])
+        )
+
+        # Consider only the currently active last (rightmost, not-yet-converged) block for splitting
         last_incomplete = None
-        for b in reversed(range(len(block_sizes))):
+        for b in reversed(range(num_blocks)):
             if total_accepted_all_blocks[b] < block_sizes[b]:
                 last_incomplete = b
                 break
 
-        if last_incomplete is not None:
-            # Reset history when the target block changes (e.g., after a split)
-            if history_for_block != last_incomplete:
-                window_gate_history = []
-                history_for_block = last_incomplete
-
+        if spawn_gate and last_incomplete is not None:
             b = last_incomplete
             Lb = block_sizes[b]
             Tb = total_accepted_all_blocks[b]
 
+            # Monitor around Tb + lookahead_size, but do not monitor beyond 2*N within this block
             monitor_cap = min(Lb - 1, 2 * n_token_seq_len - 1)
             center = min(Tb + lookahead_size, monitor_cap)
 
-            w_lo = max(Tb + 1, center - window_size)
-            w_hi = min(monitor_cap - 1, center + window_size)
+            # Window; ensure room for right side (keep < monitor_cap) and concurrency (split > Tb)
+            w_lo = max(Tb + 1, center - window_size)          # > Tb guarantees left keeps draft
+            w_hi = min(monitor_cap - 1, center + window_size) # leave >=1 token for right
 
-            passed_this_iter = False
-            split_at_candidate = None
-
-            if (w_lo <= w_hi) and (b in block_top1_confs):
-                top1_conf_vec, Tb_cache, Lb_cache = block_top1_confs[b]
-                cand_t = torch.arange(w_lo, w_hi + 1, device=device)
-                conf_idx = cand_t - Tb + 1  # index 0 in vec corresponds to block pos (Tb - 1)
-                valid = (conf_idx >= 0) & (conf_idx < top1_conf_vec.shape[0])
-
-                if valid.any():
-                    cand_t = cand_t[valid]
-                    conf_idx = conf_idx[valid]
-                    cand_conf = top1_conf_vec[conf_idx]
-                    mask = cand_conf > confidence_threshold
-                    passed_this_iter = bool(mask.any().item())
-                    if passed_this_iter:
-                        split_at_candidate = int(cand_t[mask][0].item())
-
-            # Record this iteration’s pass & fail
-            window_gate_history.append(passed_this_iter)
-
-            # Apply iter counter & consecutive confidence counter
-            spawn_gate = (
-                len(window_gate_history) >= min_iteration_thresholding_count and
-                all(window_gate_history[-accumulative_thresholding_count:])
-            )
-
-            if spawn_gate and passed_this_iter and split_at_candidate is not None:
-                split_at = split_at_candidate
+            # Only spawn if window has at least one valid split index yielding concurrent blocks
+            if w_lo <= w_hi:
+                split_at = w_lo                               # earliest feasible split
                 if Tb < split_at < Lb:
-                    left_size  = split_at
-                    right_size = Lb - left_size
+                    left_size  = split_at                     # tokens [0 .. split_at-1]
+                    right_size = Lb - left_size               # tokens [split_at .. Lb-1]
 
                     left_has_draft  = (left_size - Tb) >= 1
                     right_has_draft = right_size >= 1
@@ -258,83 +244,99 @@ def diffusion_decoding(
                         print(f'----------- Split block {b} at split_at={split_at} (Lb={Lb}, Tb={Tb}) '
                               f'for concurrency at global_iter={iter_count} -----------')
 
-                        q_logits_curr = q_logits_all_blocks[b]
-                        q_samp_curr   = q_sampled_all_blocks[b]
+                        q_logits_curr = q_logits_all_blocks[b]          # [1, M, V_block]
+                        q_samp_curr   = q_sampled_all_blocks[b]         # [1, M]
                         M = q_logits_curr.shape[1]
 
+                        # split point in "remaining draft" coords (these start at Tb)
                         split_q = max(0, min(left_size - Tb, M))
 
+                        # Partition remaining draft between left/right blocks
                         q_logits_left  = q_logits_curr[:, :split_q, :]
                         q_logits_right = q_logits_curr[:, split_q:, :]
                         q_samp_left    = q_samp_curr[:, :split_q]
                         q_samp_right   = q_samp_curr[:, split_q:]
 
+                        # Accepted redistribution:
+                        accept_left = min(total_accepted_all_blocks[b], left_size)       # = Tb
+                        accept_right = max(0, total_accepted_all_blocks[b] - left_size)  # = 0 when split_at > Tb
+
+                        # Slice accepted token ids from 'out' (relative to prompt)
                         starts = block_starts()
                         b_start = starts[b]
                         out_acc_full = out[:, prompt_len + b_start : prompt_len + b_start + total_accepted_all_blocks[b]]
-                        out_acc_left = out_acc_full[:, :min(total_accepted_all_blocks[b], left_size)]
-                        out_acc_right = out_acc_full[:, min(total_accepted_all_blocks[b], left_size):]
+                        out_acc_left = out_acc_full[:, :accept_left]
+                        out_acc_right = out_acc_full[:, accept_left:accept_left + accept_right]
 
-                        # Replace current block with left; insert right
+                        # Replace current block with left; insert new block (right) after it
                         block_sizes[b] = left_size
                         q_logits_all_blocks[b] = q_logits_left
                         q_sampled_all_blocks[b] = q_samp_left
-                        total_accepted_all_blocks[b] = out_acc_left.shape[1]
+                        total_accepted_all_blocks[b] = accept_left
                         out_accepted_all_blocks[b] = out_acc_left
 
                         block_sizes.insert(b + 1, right_size)
                         q_logits_all_blocks.insert(b + 1, q_logits_right)
                         q_sampled_all_blocks.insert(b + 1, q_samp_right)
-                        total_accepted_all_blocks.insert(b + 1, out_acc_right.shape[1])
+                        total_accepted_all_blocks.insert(b + 1, accept_right)
                         out_accepted_all_blocks.insert(b + 1, out_acc_right)
                         iteration_all_blocks.insert(b + 1, 0)
-                        # no num_blocks++; use len(block_sizes)
+                        num_blocks += 1
 
-                        # Extend only the new right block to next strict multiple of 16
+                        # -------- Extension rule: sum(left + right_new) == NEXT multiple of 16 --------
                         right_idx = b + 1
                         current_sum = block_sizes[b] + block_sizes[right_idx]
-                        target_sum  = _next_multiple_of_strict(current_sum, 16)
-                        delta_extend = target_sum - current_sum
+                        target_sum  = _next_multiple_of_strict(current_sum, 16)   # strictly larger than current_sum
+                        delta_extend = target_sum - current_sum                   # how many to add to RIGHT
 
                         if delta_extend > 0:
-                            V_right = int(q_logits_all_blocks[right_idx].shape[-1])
+                            V_right = int(q_logits_all_blocks[right_idx].shape[-1])  # use block's own V
                             extend_tokens, extend_logits = [], []
                             for _ in range(delta_extend):
                                 t = torch.tensor([random.choice(input_ids[0].tolist())],
                                                  dtype=torch.long, device=device).unsqueeze(0)
+                                # Grow global 'out' for parity with original behavior
                                 out = torch.cat((out, t), dim=1)
                                 lg = torch.full((1, V_right), float("-inf"), device=device)
                                 lg.scatter_(1, t.clamp_max(V_right - 1), 0.0)
                                 extend_tokens.append(t)
                                 extend_logits.append(lg)
+
                             if extend_tokens:
-                                ext_samp = torch.cat(extend_tokens, dim=1)
-                                ext_log  = torch.stack(extend_logits, dim=-2)
+                                ext_samp = torch.cat(extend_tokens, dim=1)          # [1, delta]
+                                ext_log  = torch.stack(extend_logits, dim=-2)       # [1, delta, V_right]
                                 q_sampled_all_blocks[right_idx] = torch.cat((q_sampled_all_blocks[right_idx], ext_samp), dim=1)
                                 q_logits_all_blocks[right_idx]  = torch.cat((q_logits_all_blocks[right_idx],  ext_log), dim=1)
                                 block_sizes[right_idx] += delta_extend
+                        # -------------------------------------------------------------------------------------
 
-                        # Reset gate history after a split
-                        window_gate_history = []
-                        history_for_block = right_idx  # track the new last-incomplete going forward
+                        # Reset the gate tracker after a split
+                        confidence_of_first_token = []
 
+        # -----------------------------
+        # Early finish check (after split logic)
+        # -----------------------------
         if all_done():
             if last_prob_next is not None:
                 next_token = torch.multinomial(last_prob_next, num_samples=1)
                 out_accepted_all_blocks[-1] = torch.cat((out_accepted_all_blocks[-1], next_token), dim=-1)
             out = out[:, :prompt_len]
-            for b in range(len(block_sizes)):
+            for b in range(num_blocks):
                 out = torch.cat((out, out_accepted_all_blocks[b]), dim=-1)
             return out, iter_count
 
+        # -----------------------------
+        # Rebuild out = prompt | (accepted + draft) for each block
+        # -----------------------------
         out = out[:, :prompt_len]
-        for b in range(len(block_sizes)):
+        starts = block_starts()
+        for b in range(num_blocks):
             if out_accepted_all_blocks[b].numel() > 0:
                 out = torch.cat((out, out_accepted_all_blocks[b]), dim=-1)
             if total_accepted_all_blocks[b] < block_sizes[b]:
                 out = torch.cat((out, q_sampled_all_blocks[b]), dim=-1)
 
-    return out, iter_count
+    return out, iter_count  # safety fallback (should have returned earlier)
 
 
 def _safe_mean(series):
@@ -347,11 +349,14 @@ def main():
     args = parser.parse_args()
     n = args.n
 
+    # =========================
+    # Config (paths + knobs)
+    # =========================
     parquet_path = "/checkpoint/lhu/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet"
 
     # Model/tokenizer
-    model_name = "/checkpoint/lhu/train_ckpts/cllm/shiftedattn-9-2-cllm-qwen2p5-coder-7B-ntok16_ce_soft_loss_flexattn_oci_data_v1_437k_samples_ar_10_cyclic_progressive_noise_ratio_all_lr1e-6/hf_merged_step_59258"
-    tokenizer_name = "/checkpoint/lhu/train_ckpts/cllm/shiftedattn-9-2-cllm-qwen2p5-coder-7B-ntok16_ce_soft_loss_flexattn_oci_data_v1_437k_samples_ar_10_cyclic_progressive_noise_ratio_all_lr1e-6/hf_merged_step_59258"
+    model_name = "/home/ubuntu/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
+    tokenizer_name = "/home/ubuntu/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
 
     # Decoding parameters
     n_token_seq_len = 64
@@ -392,7 +397,9 @@ def main():
     n = min(n, len(df))
     records = df.iloc[:n].to_dict(orient="records")
 
-    # Iterate over all records & profile
+    # =========================
+    # Iterate & profile
+    # =========================
     all_rows = []
     t0_overall = time.perf_counter()
 
@@ -452,6 +459,7 @@ def main():
                 lenience=lenience,
                 accept_threshold=accept_threshold,
                 confidence_threshold=confidence_threshold,
+                # window_size / lookahead_size left as defaults; override if desired
             )
 
             iters.append(itr_count)
@@ -465,7 +473,7 @@ def main():
             input_ids = generated_ids
             attention_mask = torch.full_like(input_ids, 1).to(model.device)
 
-            # TODO: OTPIONAL, make a debug flag for this 
+            # (optional) verbose stream:
             generated_str = ''.join(tokenizer.batch_decode(generated_ids, skip_special_tokens=False))
             print(generated_str)
 
