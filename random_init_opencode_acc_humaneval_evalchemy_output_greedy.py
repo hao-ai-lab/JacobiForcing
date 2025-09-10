@@ -116,7 +116,7 @@ def diffusion_decoding(
         eos_abs = _first_eos_abs_pos(out, prompt_len, eos_ids)
         if eos_abs is not None:
             out = out[:, :eos_abs + 1]
-            return out, itr
+            return out, itr-1
 
         L = q_sampled.shape[1]
         has_rejected = (num_accepted < L)
@@ -126,7 +126,7 @@ def diffusion_decoding(
             out = torch.cat((out, next_token), dim=-1)
             # stop if we just appended EOS
             if next_token.numel() and int(next_token[0,0]) in set(e for e in eos_ids if e is not None):
-                return out, itr
+                return out, itr-1
 
             total_accepted += 1
             q_probs_rem = p_prob[:, 1:-1, :]
@@ -142,7 +142,7 @@ def diffusion_decoding(
             out = torch.cat((out, next_token), dim=-1)
             # stop if we just appended EOS
             if next_token.numel() and int(next_token[0,0]) in set(e for e in eos_ids if e is not None):
-                return out, itr
+                return out, itr-1
 
             total_accepted += 1
             q_probs_rem = p_prob[:, num_accepted + 1:-1, :]
@@ -158,12 +158,12 @@ def diffusion_decoding(
         out = torch.cat((out, next_token), dim=-1)
         # stop if we just appended EOS
         if next_token.numel() and int(next_token[0,0]) in set(e for e in eos_ids if e is not None):
-            return out, itr
+            return out, itr-1
 
         total_accepted += 1
-        return out, itr
+        return out, itr-1
 
-    return out, itr
+    return out, itr-1
 
 
 ### Load dataset...
@@ -176,16 +176,15 @@ def diffusion_decoding(
 # ---------------------------
 # Load dataset (first 100)
 # ---------------------------
-df = pd.read_parquet("/checkpoint/lhu/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
+df = pd.read_parquet("/data/nfs01/lanxiang/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
 df_size = len(df)
 print(f"Loaded HumanEval dataset with {df_size} samples")
-records = df.to_dict(orient="records")
 records = df.to_dict(orient="records")
 
 # ---------------------------
 # Load model/tokenizer once
 # ---------------------------
-model_name = "/checkpoint/lhu/train_ckpts/cllm/shiftedattn-9-2-cllm-qwen2p5-coder-7B-ntok16_ce_soft_loss_flexattn_oci_data_v1_437k_samples_ar_10_cyclic_progressive_noise_ratio_all_lr1e-6/hf_merged_step_59258"
+model_name = "/data/nfs01/lanxiang/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     device_map="cuda",
@@ -290,7 +289,8 @@ for idx, row in tqdm(enumerate(records)):
         eos_abs = _first_eos_abs_pos(generated_ids, prompt_len, EOS_IDS)
 
         # account for how many tokens we added this call, before possibly trimming/breaking
-        added = generated_ids.shape[1] - prev_len
+        # REMOVE PREFILL TOKEN
+        added = generated_ids.shape[1] - prev_len - 1
         if added > 0:
             total_new_tokens += added
         prev_len = generated_ids.shape[1]
@@ -405,7 +405,7 @@ df_eos = df_profile[df_profile["stop_reason"] == "eos"].copy()
 n_eos = len(df_eos)
 n_total = len(df_profile)
 
-print("\n=== Diffusion Decoding Profiling (HumanEval-100) — EOS-only ===")
+print("\n=== Diffusion Decoding Profiling — EOS-only ===")
 print(f"Examples (eos): {n_eos} / {n_total}   Total wall time: {t_overall:.2f}s")
 print(f"Avg new tokens / prompt: {_safe_mean(df_eos['new_tokens']):.2f}")
 print(f"Avg calls / prompt: {_safe_mean(df_eos['calls']):.2f}")
@@ -418,4 +418,4 @@ print("\nStop reasons (all examples):")
 print(df_profile['stop_reason'].value_counts())
 
 # Optional: save EOS-only rows too
-df_eos.to_csv("diffusion_profile_humaneval100_eos.csv", index=False)
+df_eos.to_csv("diffusion_profile_humaneval_eos.csv", index=False)
