@@ -2,22 +2,18 @@
 
 # ===== Config =====
 json_files=(
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0000_avg197_min110_max219.json"
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0001_avg230_min219_max238.json"
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0002_avg245_min238_max250.json"
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0003_avg255_min250_max260.json"
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0004_avg264_min260_max268.json"
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0005_avg272_min268_max275.json"
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0006_avg278_min275_max281.json"
-    "/checkpoint/lhu/data/CLLM2_OpenCodeInstruct/1_bucketed/bucket_0007_avg284_min281_max286.json"
+    "/data/nfs01/lanxiang/data/OpenCodeInstruct_bucketed/bucket_0016_avg328_min325_max330.json"
+    "/data/nfs01/lanxiang/data/OpenCodeInstruct_bucketed/bucket_0017_avg332_min330_max334.json"
+    "/data/nfs01/lanxiang/data/OpenCodeInstruct_bucketed/bucket_0018_avg336_min334_max338.json"
+    "/data/nfs01/lanxiang/data/OpenCodeInstruct_bucketed/bucket_0019_avg341_min338_max343.json"
 )
 
-save_path="/checkpoint/lhu/data/CLLM2_data_prep/trajectory_bs_k8s_opencoderinstruct"
-log_file="/checkpoint/lhu/data/cllm_logs/generate_trajectory_bs_k8s_batch_1_data0_to_data7.log"
+save_path="/data/nfs01/lanxiang/data/CLLM2_data_prep/trajectory_bs_k8s_opencoderinstruct"
+log_file="/data/nfs01/lanxiang/data/cllm_logs/generate_trajectory_bs_k8s_batch_1_data16_to_data19.log"
 # ===== Config =====
 
-model_path="/checkpoint/lhu/models/Qwen2.5-Coder-7B-Instruct"
-n_token_seq_len=16
+model_path="/home/ubuntu/Qwen2.5-Coder-7B-Instruct"
+n_token_seq_len=32
 max_new_seq_len=2048
 data_start_id=0
 data_eos_id=25000
