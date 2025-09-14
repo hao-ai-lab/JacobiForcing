@@ -2,3 +2,4 @@ data/collected_diffusion_trajectory/*
 */__pycache__
 cllm2
 wandb
+ckpts
