@@ -72,10 +72,6 @@ class TrainingArguments(transformers.TrainingArguments):
         default=10,
         metadata={"help": "How many (k_j, last_j) pairs to use per training step (<= 0 means use all)"},
     )
-    window_size: int = field(
-        default=1024,
-        metadata={"help": "W = max tokens to keep from the *tail* of prefix_j (e.g., 1024)"},
-    )
 
 def rank0_print(local_rank, *args):
     if local_rank in (0, -1):

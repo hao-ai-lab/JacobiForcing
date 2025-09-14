@@ -34,5 +34,4 @@ torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 \
     --lr_scheduler_type "cosine" \
     --logging_steps 10 \
     --model_max_length 16384 \
-    --lazy_preprocess True \
     --qlora ${qlora}

@@ -28,7 +28,7 @@ from accelerate import Accelerator, DeepSpeedPlugin
 from pathlib import Path
 path_root = Path(__file__).parents[0]
 sys.path.append(str(path_root))
-from soft_flexattn_cllm_trainer_multiblock import CllmTrainer
+from soft_flexattn_cllm_trainer_multiblock_window import CllmTrainer
 
 logger = logging.getLogger(__name__)
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
@@ -73,8 +73,8 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "How many (k_j, last_j) pairs to use per training step (<= 0 means use all)"},
     )
     window_size: int = field(
-        default=1024,
-        metadata={"help": "W = max tokens to keep from the *tail* of prefix_j (e.g., 1024)"},
+        default=16,
+        metadata={"help": "W = max last_j and k_j pairs, where local mask make k_j see unconverged k_{0...j-1}"},
     )
 
 def rank0_print(local_rank, *args):
@@ -159,7 +159,7 @@ def train():
 
     training_args.qlora = model_args.qlora
 
-    training_args.deepspeed = training_args.deepspeed or "scripts/ds_config_cpu_offloading.json"
+    training_args.deepspeed = training_args.deepspeed or "scripts/ds_config.json"
 
     # Accelerate + DeepSpeed plugin
     ds_plugin = DeepSpeedPlugin(hf_ds_config=training_args.deepspeed)  # path or dict

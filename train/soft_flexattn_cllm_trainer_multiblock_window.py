@@ -28,6 +28,8 @@ class CllmTrainer(Trainer):
         self.train_step_cnt = 0
 
         self.max_new_tokens = args.max_new_tokens
+        self.window_size = args.window_size
+        
         self.use_gt_labels = args.use_gt_labels
         # cache BlockMasks keyed by (L, prompt_len, T, heads, version)
         self._blockmask_cache = {}
@@ -194,7 +196,8 @@ class CllmTrainer(Trainer):
         pos = (block == eos_id).nonzero(as_tuple=False)
         if pos.numel() == 0:
             return 0
-        k = int(pos[0])                  # eos offset inside block
+        # eos offset inside block
+        k = int(pos[0])
         flip_start = start + k + 1
         flip_end   = start + N
         if flip_start < flip_end:
@@ -213,18 +216,29 @@ class CllmTrainer(Trainer):
         mean_entropy = entropy.sum() / (~padding_mask).sum()
         return mean_entropy
 
-    # FlexAttention BlockMask
-    # - prompt queries: causal within prompt
-    # - k_j queries: causal within *their own* k_j block + prompt
-    # - last_j queries: causal within *their own* last_j block + prompt
-    def _build_block_mask(self, L: int, prompt_len: int, T: int, heads: int):
-        N = self.max_new_tokens
-        k_starts, l_starts = self._index_layout(prompt_len, T, N)
+    def _build_block_mask(self, L: int, prompt_len: int, T: int, heads: int, window_size: int = 16):
+        """
+        Sequence layout:
+        [prompt][k_0][last_0][k_1][last_1] ... [k_j][last_j] ... [k_{T-1}][last_{T-1}]
 
+        Rules:
+        • Within a window of size w (pairs j in [i, i+w-1]): use Implementation 1
+            - k_j sees: prompt, previous last_{i..j-1}, and causal inside its own k_j block; no k_* outside its own block
+            - last_j sees: prompt, previous last_{i..j-1}, and causal inside its own last_j block
+        • Across windows:
+            - k_j sees: prompt + last_{0..i-1} from previous windows; no k_{0..i-1}
+            - last_j sees: prompt + last_{0..i-1} from previous windows
+        """
+
+        N = self.max_new_tokens
+        w = max(window_size, 1)
+
+        k_starts, l_starts = self._index_layout(prompt_len, T, N)
         ks = torch.tensor(k_starts, device=self.args.device)
         ls = torch.tensor(l_starts, device=self.args.device)
 
         def mask_mod(b, h, q, k):
+            # q, k are scalar torch tensors (indices)
             rel_q = q - prompt_len
             rel_k = k - prompt_len
             block_idx_q = torch.div(rel_q, N, rounding_mode="floor")
@@ -241,39 +255,72 @@ class CllmTrainer(Trainer):
             # j index for q, clamped to [0, T-1]
             j_q = torch.clamp(block_idx_q // 2, min=0, max=T - 1)
 
-            ks_per_q = ks[j_q]
-            ls_per_q = ls[j_q]
+            ks_per_q = ks[j_q]  # start idx of current k_j block
+            ls_per_q = ls[j_q]  # start idx of current last_j block
 
-            # for k_j queries, allow attending to ALL PREVIOUS k_* blocks
-            # (k blocks have even block indices: 0, 2, 4, ... 2*(j_q-1))
-            k_in_prev_k   = is_kj_k    & (block_idx_k < 2 * j_q)
-            # keep old behavior for last_j (still sees previous last_*)
-            last_in_prev_last = is_lastj_k & (block_idx_k < 2 * j_q)
+            # window bookkeeping
+            w = max(int(window_size), 1)
+            window_start_j = (j_q // w) * w
+            # block idx of k_i
+            window_start_block = 2 * window_start_j
 
-            # prompt is always causal
+            # tokens in prior windows: allow ONLY last_* from those windows
+            prev_windows_last = is_lastj_k & (block_idx_k < window_start_block)
+
+            # prompt is causal for prompt queries
             mask_prompt = is_prompt_q & (k <= q)
 
-            # k_j queries:
-            same_kj_block = is_kj_q & is_kj_k & (block_idx_q == block_idx_k)
+            # ----- k_j queries -----
+            # within-window: allow ONLY the immediately previous k_{j-1}
+            prev_k_block_idx = 2 * j_q - 2
+            has_prev_in_window = j_q > window_start_j
+            within_window_prev_k_immediate = (
+                has_prev_in_window & is_kj_k & (block_idx_k == prev_k_block_idx)
+            )
+
+            same_kj_block = is_kj_k & (block_idx_q == block_idx_k)
             mask_kj = is_kj_q & (
+                # full prompt visible to non-prompt queries
                 is_prompt_k |
-                k_in_prev_k |  # attends to "previous k_*"
+                # across windows: only last_* from earlier windows
+                prev_windows_last |
+                # within window: only the immediately previous k_{j-1}
+                within_window_prev_k_immediate |
+                # causal inside its own k_j block
                 (same_kj_block & (k >= ks_per_q) & (k <= q))
             )
 
-            # last_j queries (UNCHANGED):
-            same_lastj_block = is_lastj_q & is_lastj_k & (block_idx_q == block_idx_k)
+            # ----- last_j queries -----
+            # within-window previous last_{i .. j-1}
+            within_window_prev_last = (
+                is_lastj_k &
+                # first last in window is 2*i+1
+                (block_idx_k >= (window_start_block + 1)) &
+                # strictly before current j
+                (block_idx_k < 2 * j_q)                     
+            )
+
+            same_lastj_block = is_lastj_k & (block_idx_q == block_idx_k)
             mask_lastj = is_lastj_q & (
                 is_prompt_k |
-                last_in_prev_last |  # attends to all previous last_{<j}
+                prev_windows_last |
+                within_window_prev_last |
                 (same_lastj_block & (k >= ls_per_q) & (k <= q))
             )
 
             return mask_prompt | mask_kj | mask_lastj
 
+
         block_mask = create_block_mask(
-            mask_mod, B=1, H=heads, Q_LEN=L, KV_LEN=L, device=self.args.device, _compile=True,
+            mask_mod,
+            B=1,
+            H=heads,
+            Q_LEN=L,
+            KV_LEN=L,
+            device=self.args.device,
+            _compile=True,
         )
+        
         return block_mask
 
     def training_step(self, model, inputs, num_items_in_batch=None):
@@ -343,7 +390,7 @@ class CllmTrainer(Trainer):
         num_heads = getattr(self.cfg, 'num_attention_heads', 28)
         #print(f"num heads from config: {self.cfg.num_attention_heads}")
         #print(f"[block mask] num_heads={num_heads}, L={L}, prompt_len={prompt_len}, T={T}, N={N}")
-        blk_mask = self._build_block_mask(L, prompt_len, T, num_heads)
+        blk_mask = self._build_block_mask(L, prompt_len, T, num_heads, window_size=self.window_size)
         # shared position ids for each (k_j, last_j) pair
         position_ids = self._build_shared_position_ids(L, prompt_len, T)
 
@@ -826,7 +873,8 @@ class CllmTrainer(Trainer):
 
             loss_consistency = loss_consistency * (T_soft * T_soft) / T
 
-        total_loss = loss_ar + loss_consistency
+        #total_loss = loss_ar + loss_consistency
+        total_loss = loss_ar
 
         if self.args.qlora:
             total_loss.requires_grad = True

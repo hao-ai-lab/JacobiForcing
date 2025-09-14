@@ -33,8 +33,9 @@ records = df.to_dict(orient="records")
 # ---------------------------
 # Load model/tokenizer once
 # ---------------------------
-model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
+#model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
 #model_name = "/home/lah003/models/yc-blk32-10k"
+model_name = "/home/lah003/models/0911_blcksz32_w32_steps58k"
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
     device_map="cuda",
@@ -51,7 +52,7 @@ alt_eos_id = 151645  # keep your special EOS as a fallback
 # ---------------------------
 # Generation/profiling config
 # ---------------------------
-n_token_seq_len = 16
+n_token_seq_len = 4
 
 # Safety caps so a sample can't run forever.
 max_new_tokens = 1024     # hard cap on total new tokens per prompt
@@ -264,7 +265,7 @@ for i, original_generation in enumerate(original_generations):
     original_generation['generation'] = processed_generation
 
 # Save processed generations
-save_path = os.path.join(eval_dir, f'blk16_400k_ntok16_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+save_path = os.path.join(eval_dir, f'blk32_460k_ntok4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 save_jsonl(original_generations, save_path)
 
 print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")
@@ -289,12 +290,12 @@ n_eos = len(df_eos)
 n_total = len(df_profile)
 
 print("\n=== Diffusion Decoding Profiling — EOS-only ===")
-print(f"Examples (eos): {n_eos} / {n_total}   Total wall time: {t_overall:.2f}s")
-print(f"Avg new tokens / prompt: {_safe_mean(df_eos['new_tokens']):.2f}")
-print(f"Avg calls / prompt: {_safe_mean(df_eos['calls']):.2f}")
-print(f"Avg iterations / call: {_safe_mean(df_eos['avg_iter_per_call']):.2f}")
-print(f"Avg iterations / token: {_safe_mean(df_eos['avg_iter_per_token']):.2f}")
-print(f"Avg toks/sec: {_safe_mean(df_eos['toks_per_sec']):.2f}")
+print(f"Examples (eos): {n_eos} / {n_total}   Total wall time: {t_overall:.4f}s")
+print(f"Avg new tokens / prompt: {_safe_mean(df_eos['new_tokens']):.4f}")
+print(f"Avg calls / prompt: {_safe_mean(df_eos['calls']):.4f}")
+print(f"Avg iterations / call: {_safe_mean(df_eos['avg_iter_per_call']):.4f}")
+print(f"Avg iterations / token: {_safe_mean(df_eos['avg_iter_per_token']):.4f}")
+print(f"Avg toks/sec: {_safe_mean(df_eos['toks_per_sec']):.4f}")
 
 # Optional: also show overall stop-reason distribution for context
 print("\nStop reasons (all examples):")

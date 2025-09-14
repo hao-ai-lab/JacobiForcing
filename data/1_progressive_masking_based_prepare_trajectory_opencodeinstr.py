@@ -11,7 +11,7 @@ from glob import glob
 # =====================
 tokenizer = None
 # Use the same tokenizer as your generation script for consistent chat templates
-TOKENIZER_PATH = "/home/lah003/models/Qwen2.5-7B-Instruct"
+TOKENIZER_PATH = "/home/lah003/models/Qwen2.5-Coder-7B-Instruct"
 
 
 def init_worker():
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     subset_size = len(ds) // SPLIT_RATIO
     indices = list(range(len(ds)))
     random.shuffle(indices)
-    selected_indices = indices[:subset_size]
+    selected_indices = indices[subset_size:subset_size*2]
     ds_subset = ds.select(selected_indices)
 
     print("Subset size:", len(ds_subset))
@@ -237,7 +237,7 @@ if __name__ == "__main__":
     os.makedirs(OUTFILE_DIR, exist_ok=True)
     OUTFILE = os.path.join(
         OUTFILE_DIR,
-        f"train_opencodeinstruct_split_ratio_{SPLIT_RATIO}_size_{len(ds_subset)}_ntok_size_{N_TOKEN_SEQ_LENGTH}_lookup_size_{LOOKUP_CONTEXT_LENGTH}_sampling_ratio_{SEQUENCE_SAMPLING_RATIO}_eos_tokens_termination_without_think_format_without_sysmsg.json",
+        f"idx_1_train_opencodeinstruct_split_ratio_{SPLIT_RATIO}_size_{len(ds_subset)}_ntok_size_{N_TOKEN_SEQ_LENGTH}_lookup_size_{LOOKUP_CONTEXT_LENGTH}_sampling_ratio_{SEQUENCE_SAMPLING_RATIO}_eos_tokens_termination_without_think_format_without_sysmsg.json",
     )
 
     N_WORKERS = min(12, os.cpu_count() or 4)

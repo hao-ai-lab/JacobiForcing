@@ -63,7 +63,7 @@ def jacobi_forward_greedy(
 
     # ---- LogitsProcessor: greedy only
     from transformers.generation.logits_process import LogitsProcessorList
-    logits_processors = LogitsProcessorList()
+    #logits_processors = LogitsProcessorList()
 
     if prefill_phase: # prefill phase, just compute the keys & values of prompt, return first_correct_token
         
@@ -190,11 +190,11 @@ def jacobi_forward_greedy(
             logits = self.lm_head(hidden_states).float()
     
             # Apply logits processor, then softmax
-            p_scores = logits_processors(out, logits.squeeze(0)).unsqueeze(0) 
-            p_prob = torch.nn.functional.softmax(p_scores, dim=-1)
+            #p_scores = logits_processors(out, logits.squeeze(0)).unsqueeze(0) 
+            #p_prob = torch.nn.functional.softmax(p_scores, dim=-1)
     
             # Greedy tokens for each draft position (exclude the last slot which is prob_next)
-            greedy_tokens = torch.argmax(p_prob[:, :-1, :], dim=-1)      # [1, L-1]
+            greedy_tokens = torch.argmax(logits[:, :-1, :], dim=-1)      # [1, L-1]
             # Compare draft vs greedy: accept the longest exact-match prefix
             mismatch = (out[:, 1:] != greedy_tokens)
             accepted = (mismatch.cumsum(dim=-1) == 0).sum(dim=-1)+1
@@ -224,7 +224,7 @@ def jacobi_forward_greedy(
                 if to_delete > 0:
                     past_key_values.delete_false_key_value(to_delete)
                 # Return truncated outputs up to EOS
-                return past_key_values, torch.full((1,1), eos_id, device=device, dtype=out.dtype), accepted_n_gram[:, :total_accepted], itr
+                return past_key_values, torch.full((1,1), eos_id, device=device, dtype=out.dtype), accepted_n_gram[:, :total_accepted], itr-1
 
             has_rejected = (num_accepted_raw < L)  # note: use raw to preserve original mismatch logic
             # BRANCH: WITH REJECTED TOKENS IN THE DRAFT
@@ -232,7 +232,7 @@ def jacobi_forward_greedy(
                 # Delete false keys&values for the rejected tail
                 past_key_values.delete_false_key_value(out.shape[1]-num_accepted_raw)
                 # Next token is the greedy token at the first mismatch position
-                next_token = torch.argmax(p_prob[:, num_accepted_raw-1, :], dim=-1, keepdim=True)
+                next_token = torch.argmax(logits[:, num_accepted_raw-1, :], dim=-1, keepdim=True)
 
                 # --- EOS on the next sampled token, return
                 if eos_enabled and next_token.item() == eos_id:
@@ -244,12 +244,12 @@ def jacobi_forward_greedy(
                     to_delete = max(0, current_len - desired_len)
                     if to_delete > 0:
                         past_key_values.delete_false_key_value(to_delete)
-                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr
+                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr-1
 
                 # keep drafting from the mismatch token
                 out = next_token
                 # Rebuild draft tail greedily from the remaining positions in this pass (after the mismatch slot)
-                q_probs_rem = p_prob[:, num_accepted_raw:-1, :]
+                q_probs_rem = logits[:, num_accepted_raw:-1, :]
                 if q_probs_rem.shape[1] > 0:
                     q_sampled = torch.argmax(q_probs_rem, dim=-1)  # [1, L']
                     out = torch.cat((out, q_sampled), dim=-1)
@@ -257,7 +257,7 @@ def jacobi_forward_greedy(
             # BRANCH: WITHOUT REJECTED TOKENS IN THE DRAFT
             else:
                 # If we didn't reject anything, append the next greedy token and finish this block
-                next_token = torch.argmax(p_prob[:, -1, :], dim=-1, keepdim=True)
+                next_token = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
 
                 # --- write the appended token to accepted_n_gram
                 accepted_n_gram[:, total_accepted:total_accepted+1] = next_token
@@ -270,7 +270,7 @@ def jacobi_forward_greedy(
                     to_delete = max(0, current_len - desired_len)
                     if to_delete > 0:
                         past_key_values.delete_false_key_value(to_delete)
-                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr
+                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr-1
 
         # Hit length limit without EOS
         return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr
