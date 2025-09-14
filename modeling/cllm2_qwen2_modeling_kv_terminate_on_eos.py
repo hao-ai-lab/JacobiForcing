@@ -213,14 +213,14 @@ def jacobi_forward_greedy(
                 return past_key_values, torch.full((1,1), eos_id, device=device, dtype=out.dtype), accepted_n_gram[:, :total_accepted], itr
 
             has_rejected = (num_accepted_raw < L)  # note: use raw to preserve original mismatch logic
-
+            # BRANCH: WITH REJECTED TOKENS IN THE DRAFT
             if has_rejected:
                 # Delete false keys&values for the rejected tail
                 past_key_values.delete_false_key_value(out.shape[1]-num_accepted_raw)
                 # Next token is the greedy token at the first mismatch position
                 next_token = torch.argmax(p_prob[:, num_accepted_raw-1, :], dim=-1, keepdim=True)
 
-                # --- EOS handling on the next sampled token (first mismatch)
+                # --- EOS on the next sampled token, return
                 if eos_enabled and next_token.item() == eos_id:
                     # accept EOS and stop
                     accepted_n_gram[:, total_accepted:total_accepted+1] = next_token
@@ -234,32 +234,30 @@ def jacobi_forward_greedy(
 
                 # keep drafting from the mismatch token
                 out = next_token
-
                 # Rebuild draft tail greedily from the remaining positions in this pass (after the mismatch slot)
                 q_probs_rem = p_prob[:, num_accepted_raw:-1, :]
                 if q_probs_rem.shape[1] > 0:
                     q_sampled = torch.argmax(q_probs_rem, dim=-1)  # [1, L']
                     out = torch.cat((out, q_sampled), dim=-1)
-                    
-                continue
-    
-            # If we didn't reject anything, append the next greedy token and finish this block
-            next_token = torch.argmax(p_prob[:, -1, :], dim=-1, keepdim=True)
+            
+            # BRANCH: WITHOUT REJECTED TOKENS IN THE DRAFT
+            else:
+                # If we didn't reject anything, append the next greedy token and finish this block
+                next_token = torch.argmax(p_prob[:, -1, :], dim=-1, keepdim=True)
 
-            # --- write the appended token to accepted_n_gram
-            accepted_n_gram[:, total_accepted:total_accepted+1] = next_token
-
-            # --- EOS handling on the appended next token
-            if eos_enabled and next_token.item() == eos_id:
+                # --- write the appended token to accepted_n_gram
+                accepted_n_gram[:, total_accepted:total_accepted+1] = next_token
                 total_accepted += 1
-                current_len = past_key_values.get_seq_length()
-                desired_len = total_accepted
-                to_delete = max(0, current_len - desired_len)
-                if to_delete > 0:
-                    past_key_values.delete_false_key_value(to_delete)
-                return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr
 
-            total_accepted += 1  # normal non-EOS advance
+                # --- EOS handling on the appended next token
+                if eos_enabled and next_token.item() == eos_id:
+                    
+                    current_len = past_key_values.get_seq_length()
+                    desired_len = total_accepted
+                    to_delete = max(0, current_len - desired_len)
+                    if to_delete > 0:
+                        past_key_values.delete_false_key_value(to_delete)
+                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr
 
         # Hit length limit without EOS
         return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr

@@ -29,7 +29,7 @@ def parse_args():
 
     # Gen settings
     p.add_argument("--max_new_tokens", type=int, default=1024)
-    p.add_argument("--temperature", type=float, default=1.0)
+    p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--top_p", type=float, default=1.0)
     p.add_argument("--do_sample", action="store_true", default=False)
     p.add_argument("--seed", type=int, default=1234)
@@ -219,10 +219,7 @@ def main():
     print("\n=== AR Generation Profiling (HumanEval) ===")
     print(f"Examples (eos): {n_eos} / {n_total}   Total gen time: {overall_gen_time:.2f}s (overall wall: {t_overall:.2f}s)")
     print(f"Avg new tokens / prompt: {_safe_mean(df_eos['new_tokens']):.2f}")
-    print(f"Avg toks/sec (gen-only): {_safe_mean(df_eos['toks_per_sec']):.2f}")
-
-    overall_tps = (df_eos['total_tokens'].sum() / overall_gen_time) if overall_gen_time > 0 else float("nan")
-    print(f"Overall throughput (tokens/sec, gen-only): {overall_tps:.2f}")
+    print(f"Avg toks/sec: {_safe_mean(df_eos['toks_per_sec']):.2f}")
 
 if __name__ == "__main__":
     main()

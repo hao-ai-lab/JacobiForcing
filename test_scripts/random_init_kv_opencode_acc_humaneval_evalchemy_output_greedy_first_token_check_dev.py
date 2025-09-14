@@ -19,7 +19,7 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos import jacobi_forward_greedy
+from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved import jacobi_forward_greedy
 Qwen2ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
 
 # ---------------------------
@@ -51,7 +51,7 @@ alt_eos_id = 151645  # keep your special EOS as a fallback
 # ---------------------------
 # Generation/profiling config
 # ---------------------------
-n_token_seq_len = 64
+n_token_seq_len = 128
 
 # Safety caps so a sample can't run forever.
 max_new_tokens = 1024     # hard cap on total new tokens per prompt
@@ -62,10 +62,9 @@ max_calls = 1024          # hard cap on number of diffusion_decoding calls per p
 # ---------------------------
 all_rows = []
 t0_overall = time.perf_counter()
+all_generations = []
 
 total_gen_only_time = 0
-
-all_generations = []
 
 for idx, row in tqdm(enumerate(records)):
     task_id = row.get("task_id", f"idx_{idx}")
@@ -97,6 +96,9 @@ Please continue to complete the function. You are not allowed to modify the give
     prefill_phase = True
     generated_ids = input_ids
     
+    prefill_drafted_n_gram = None
+    first_token_correct_flag = False
+    
     gen_only_time = 0
 
     t_start = time.time()
@@ -125,9 +127,18 @@ Please continue to complete the function. You are not allowed to modify the give
 
         ### One diffusion decoding call
         if prefill_phase:
-            # TODO: pass in random-init draft, pass out iteration result from first iteration
-            past_key_values, first_correct_token, _, iter_count = model.jacobi_forward_greedy(
-                input_ids=input_ids,
+            # pass in random-init draft
+            q_sampled = []
+            for _ in range(n_token_seq_len):
+                q_sample = torch.tensor([random.choice(generated_ids[0].tolist())], dtype=torch.long, device=model.device).unsqueeze(0)
+                q_sampled.append(q_sample)
+            prefill_draft_token_ids = torch.cat(q_sampled, dim=1)  # shape [1, n_token_seq_len]
+            
+            prefill_input_ids = torch.cat((input_ids, prefill_draft_token_ids),dim=-1)
+            
+            # `jacobi_forward_greedy` will return iteration result from first iteration
+            past_key_values, first_correct_token, prefill_drafted_n_gram, iter_count, first_token_correct_flag = model.jacobi_forward_greedy(
+                input_ids=prefill_input_ids,
                 attention_mask=attention_mask,
                 past_key_values=None,
                 use_cache=True,
@@ -143,20 +154,32 @@ Please continue to complete the function. You are not allowed to modify the give
             # generation phase
             # ---- Initialize a draft tail (any tokens work; we'll fix on the first pass).
             # We keep your "random from prompt" init to avoid extra forward passes.
-            q_sampled = []
-            for _ in range(n_token_seq_len-1):
-                q_sample = torch.tensor([random.choice(generated_ids[0].tolist())], dtype=torch.long, device=model.device).unsqueeze(0)
-                q_sampled.append(q_sample)
-            q_sampled = torch.cat(q_sampled, dim=1)  # shape [1, n_token_seq_len]
-            input_ids = torch.cat((first_correct_token.view(1,-1), q_sampled),dim=-1)
-            
+            if calls == 1:
+                # First non-prefill call: reuse draft_tokens produced by prefill
+                input_ids = prefill_drafted_n_gram
+            else:
+                q_sampled = []
+                if first_token_correct_flag:
+                    for _ in range(n_token_seq_len-1):
+                        q_sample = torch.tensor([random.choice(generated_ids[0].tolist())], dtype=torch.long, device=model.device).unsqueeze(0)
+                        q_sampled.append(q_sample)
+                    q_sampled = torch.cat(q_sampled, dim=1)  # shape [1, n_token_seq_len-1]
+                    input_ids = torch.cat((first_correct_token.view(1,-1), q_sampled),dim=-1)
+                else:
+                    for _ in range(n_token_seq_len):
+                        q_sample = torch.tensor([random.choice(generated_ids[0].tolist())], dtype=torch.long, device=model.device).unsqueeze(0)
+                        q_sampled.append(q_sample)
+                    q_sampled = torch.cat(q_sampled, dim=1)  # shape [1, n_token_seq_len-1]
+                    input_ids = q_sampled
+
             t_gen_start = time.perf_counter()
-            past_key_values, first_correct_token, accepted_n_gram, itr_count = model.jacobi_forward_greedy(
+            past_key_values, first_correct_token, accepted_n_gram, itr_count, first_token_correct_flag = model.jacobi_forward_greedy(
                 input_ids=input_ids,
                 attention_mask=None,
                 past_key_values=past_key_values,
                 use_cache=True,
                 prefill_phase=prefill_phase,
+                first_token_correct_flag=first_token_correct_flag,
                 n_token_seq_len=n_token_seq_len,
                 tokenizer=tokenizer,
                 eos_token_id=eos_id,
@@ -181,6 +204,7 @@ Please continue to complete the function. You are not allowed to modify the give
     total_iterations = sum(iters)
     avg_iter_per_call = (total_iterations / calls)
     avg_iter_per_token = (total_iterations / total_new_tokens)
+    
     toks_per_sec = (total_new_tokens / gen_only_time)
     
     total_gen_only_time += gen_only_time
@@ -249,7 +273,7 @@ for i, original_generation in enumerate(original_generations):
     original_generation['generation'] = processed_generation
 
 # Save processed generations
-save_path = os.path.join(eval_dir, f'legacy_blk16_400k_ntok64_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+save_path = os.path.join(eval_dir, f'blk16_400k_ntok128_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 save_jsonl(original_generations, save_path)
 
 print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")
@@ -286,4 +310,4 @@ print("\nStop reasons (all examples):")
 print(df_profile['stop_reason'].value_counts())
 
 # Optional: save EOS-only rows too
-df_eos.to_csv("diffusion_profile_greedy_humaneval_eos.csv", index=False)
+df_eos.to_csv("diffusion_profile_humaneval100_eos.csv", index=False)
