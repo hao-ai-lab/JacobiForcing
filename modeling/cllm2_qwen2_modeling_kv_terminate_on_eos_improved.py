@@ -40,6 +40,7 @@ def jacobi_forward_greedy(
     past_key_values: Optional[Cache] = None,
     use_cache: Optional[bool] = None,
     prefill_phase: Optional[bool] = False,
+    prefill_draft_token_ids: Optional[torch.LongTensor] = None,
     n_token_seq_len = 64,
     temperature = 1.0,
     top_p = 0.9, 
@@ -66,6 +67,9 @@ def jacobi_forward_greedy(
     logits_processors = LogitsProcessorList()
 
     if prefill_phase: # prefill phase, just compute the keys & values of prompt
+        
+        if (attention_mask is None) or (input_ids.shape[1] > attention_mask.shape[1]):
+            attention_mask = torch.ones_like(input_ids)
         
         inputs_embeds = self.model.embed_tokens(input_ids)
     
@@ -117,11 +121,22 @@ def jacobi_forward_greedy(
         logits = self.lm_head(hidden_states).float()
 
         scores = logits_processors(input_ids, logits.squeeze(0)).unsqueeze(0) 
-        probs = torch.nn.functional.softmax(scores, dim=-1)
-        first_correct_token = torch.argmax(probs[:, -1, :], dim=-1, keepdim=True)
+        #probs = torch.nn.functional.softmax(scores, dim=-1)
+        first_correct_token = torch.argmax(scores[:, -(n_token_seq_len+1), :], dim=-1, keepdim=True)
         
-        # TODO: pass the draft here to the next iteration for inspection
-        return past_key_values, first_correct_token, None, 0
+        # ---- crop the provided draft AFTER forward pass ----
+        # take the last n_token_seq_len tokens (the draft block) and drop the last one
+        prefill_block = input_ids[:, -n_token_seq_len:]
+        prefill_drafted_n_gram = prefill_block[:, :-1].contiguous()
+        
+        # crop KV back to prompt-only (remove appended draft)
+        current_len = past_key_values.get_seq_length()
+        desired_len = max(0, current_len - n_token_seq_len)
+        to_delete   = current_len - desired_len
+        if to_delete > 0:
+            past_key_values.delete_false_key_value(to_delete)        
+        
+        return past_key_values, first_correct_token, prefill_drafted_n_gram, 0
 
     else: # generation phase, input as random_initilized point ([first_corrected_token, tokens_from_prompt]) and output as fixed point
 
@@ -177,10 +192,12 @@ def jacobi_forward_greedy(
     
             # Apply logits processor, then softmax
             p_scores = logits_processors(out, logits.squeeze(0)).unsqueeze(0) 
-            p_prob = torch.nn.functional.softmax(p_scores, dim=-1)
-    
+            
+            # TODO: make this generalizable to support top-k, now taking only p_scores for the sake of efficiency
+            #p_prob = torch.nn.functional.softmax(p_scores, dim=-1)
             # Greedy tokens for each draft position (exclude the last slot which is prob_next)
-            greedy_tokens = torch.argmax(p_prob[:, :-1, :], dim=-1)      # [1, L-1]
+            greedy_tokens = torch.argmax(p_scores[:, :-1, :], dim=-1)      # [1, L-1]
+            
             # Compare draft vs greedy: accept the longest exact-match prefix
             mismatch = (out[:, 1:] != greedy_tokens)
             accepted = (mismatch.cumsum(dim=-1) == 0).sum(dim=-1)+1
@@ -218,7 +235,10 @@ def jacobi_forward_greedy(
                 # Delete false keys&values for the rejected tail
                 past_key_values.delete_false_key_value(out.shape[1]-num_accepted_raw)
                 # Next token is the greedy token at the first mismatch position
-                next_token = torch.argmax(p_prob[:, num_accepted_raw-1, :], dim=-1, keepdim=True)
+                #next_token = torch.argmax(p_prob[:, num_accepted_raw-1, :], dim=-1, keepdim=True)
+                
+                # TODO: support p_prob to make more generalizable, while keep efficiency
+                next_token = torch.argmax(p_scores[:, num_accepted_raw-1, :], dim=-1, keepdim=True)
 
                 # --- EOS handling on the next sampled token (first mismatch)
                 if eos_enabled and next_token.item() == eos_id:
@@ -236,7 +256,9 @@ def jacobi_forward_greedy(
                 out = next_token
 
                 # Rebuild draft tail greedily from the remaining positions in this pass (after the mismatch slot)
-                q_probs_rem = p_prob[:, num_accepted_raw:-1, :]
+                # TODO: support p_prob to make more generalizable, while keep efficiency
+                #q_probs_rem = p_prob[:, num_accepted_raw:-1, :]
+                q_probs_rem = p_scores[:, num_accepted_raw:-1, :]
                 if q_probs_rem.shape[1] > 0:
                     q_sampled = torch.argmax(q_probs_rem, dim=-1)  # [1, L']
                     out = torch.cat((out, q_sampled), dim=-1)
@@ -244,7 +266,9 @@ def jacobi_forward_greedy(
                 continue
     
             # If we didn't reject anything, append the next greedy token and finish this block
-            next_token = torch.argmax(p_prob[:, -1, :], dim=-1, keepdim=True)
+            # TODO: support p_prob to make more generalizable, while keep efficiency
+            #next_token = torch.argmax(p_prob[:, -1, :], dim=-1, keepdim=True)
+            next_token = torch.argmax(p_scores[:, -1, :], dim=-1, keepdim=True)
 
             # --- write the appended token to accepted_n_gram
             accepted_n_gram[:, total_accepted:total_accepted+1] = next_token

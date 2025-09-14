@@ -24,18 +24,18 @@ def _safe_mean(series):
     return float(s.mean()) if s.size and not pd.isna(s).all() else float("nan")
 
 # Dataset (Humaneval-100)
-df = pd.read_parquet("/checkpoint/lhu/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
+df = pd.read_parquet("/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
 records = df.head(100).to_dict(orient="records")
 
 # Model
-model_name = "/checkpoint/lhu/train_ckpts/cllm/shiftedattn-8-31-cllm-qwen2p5-coder-7B-ntok16_ce_soft_loss_flexattn_oci_data_v1_437k_samples_ar_10_cyclic_progressive_noise_all_lr5e-6/hf_ckpts/hf_merged_step_44500"
+model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
     device_map="cuda",
     torch_dtype=torch.bfloat16,
     attn_implementation="flash_attention_2"
 )
-tokenizer = AutoTokenizer.from_pretrained("/checkpoint/lhu/models/Qwen2.5-Coder-7B-Instruct")
+tokenizer = AutoTokenizer.from_pretrained("/home/lah003/models/Qwen2.5-7B-Instruct")
 tokenizer.padding_side = "left"
 model.eval()
 
@@ -248,9 +248,18 @@ t0_overall = time.perf_counter()
 def _mk_prompt(row):
     #return ("You are given a partially completed Python function with the header and the doc string. "
     #        "Complete the following function according to given information:\n\n" + row["prompt"])
-    return (
-        "Respond only in code.\n" + row["prompt"]
+    prompt = """
+Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
+```python
+{}
+```
+""".strip().format(
+        row["prompt"].strip()
     )
+    #return (
+    #    "Respond only in code.\n" + row["prompt"]
+    #)
+    return prompt
 
 for i in range(0, len(records), batch_size):
     batch = records[i:i+batch_size]
