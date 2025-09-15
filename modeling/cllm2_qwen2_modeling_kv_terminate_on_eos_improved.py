@@ -224,7 +224,7 @@ def jacobi_forward_greedy(
                 if to_delete > 0:
                     past_key_values.delete_false_key_value(to_delete)
                 # Return truncated outputs up to EOS
-                return past_key_values, torch.full((1,1), eos_id, device=device, dtype=out.dtype), accepted_n_gram[:, :total_accepted], itr-1
+                return past_key_values, torch.full((1,1), eos_id, device=device, dtype=out.dtype), accepted_n_gram[:, :total_accepted], itr
 
             has_rejected = (num_accepted_raw < L)  # note: use raw to preserve original mismatch logic
             # BRANCH: WITH REJECTED TOKENS IN THE DRAFT
@@ -244,7 +244,7 @@ def jacobi_forward_greedy(
                     to_delete = max(0, current_len - desired_len)
                     if to_delete > 0:
                         past_key_values.delete_false_key_value(to_delete)
-                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr-1
+                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr
 
                 # keep drafting from the mismatch token
                 out = next_token
@@ -270,7 +270,7 @@ def jacobi_forward_greedy(
                     to_delete = max(0, current_len - desired_len)
                     if to_delete > 0:
                         past_key_values.delete_false_key_value(to_delete)
-                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr-1
+                    return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr
 
         # Hit length limit without EOS
         return past_key_values, next_token, accepted_n_gram[:, :total_accepted], itr

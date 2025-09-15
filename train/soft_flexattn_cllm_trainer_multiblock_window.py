@@ -865,8 +865,7 @@ class CllmTrainer(Trainer):
 
             loss_consistency = loss_consistency * (T_soft * T_soft) / T
 
-        #total_loss = loss_ar + loss_consistency
-        total_loss = loss_ar
+        total_loss = loss_ar + loss_consistency
 
         if self.args.qlora:
             total_loss.requires_grad = True
