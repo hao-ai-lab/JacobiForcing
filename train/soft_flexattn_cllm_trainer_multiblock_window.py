@@ -231,14 +231,13 @@ class CllmTrainer(Trainer):
         """
 
         N = self.max_new_tokens
-        w = max(window_size, 1)
 
         k_starts, l_starts = self._index_layout(prompt_len, T, N)
         ks = torch.tensor(k_starts, device=self.args.device)
         ls = torch.tensor(l_starts, device=self.args.device)
 
         def mask_mod(b, h, q, k):
-            # q, k are scalar torch tensors (indices)
+            # q, k tensors
             rel_q = q - prompt_len
             rel_k = k - prompt_len
             block_idx_q = torch.div(rel_q, N, rounding_mode="floor")
@@ -255,49 +254,42 @@ class CllmTrainer(Trainer):
             # j index for q, clamped to [0, T-1]
             j_q = torch.clamp(block_idx_q // 2, min=0, max=T - 1)
 
-            ks_per_q = ks[j_q]  # start idx of current k_j block
-            ls_per_q = ls[j_q]  # start idx of current last_j block
+            ks_per_q = ks[j_q]  # start index of current k_j block
+            ls_per_q = ls[j_q]  # start index of current last_j block
 
-            # window bookkeeping
-            w = max(int(window_size), 1)
-            window_start_j = (j_q // w) * w
-            # block idx of k_i
-            window_start_block = 2 * window_start_j
+            # ---------- window bookkeeping ----------
+            w = max(window_size, 1)
+            window_start_j = (j_q // w) * w             # i
+            window_start_block = 2 * window_start_j     # block index of k_i
 
-            # tokens in prior windows: allow ONLY last_* from those windows
+            # keys from previous windows: allow ONLY last_* from those windows
             prev_windows_last = is_lastj_k & (block_idx_k < window_start_block)
 
             # prompt is causal for prompt queries
             mask_prompt = is_prompt_q & (k <= q)
 
-            # ----- k_j queries -----
-            # within-window: allow ONLY the immediately previous k_{j-1}
-            prev_k_block_idx = 2 * j_q - 2
-            has_prev_in_window = j_q > window_start_j
-            within_window_prev_k_immediate = (
-                has_prev_in_window & is_kj_k & (block_idx_k == prev_k_block_idx)
+            # ---------- k_j queries ----------
+            # within the same window, allow ALL earlier k-blocks: k_i .. k_{j-1}
+            within_window_prev_k = (
+                is_kj_k
+                & (block_idx_k >= (2 * window_start_j))  # first k in window is 2*i
+                & (block_idx_k <  (2 * j_q))             # strictly before current k_j
             )
 
             same_kj_block = is_kj_k & (block_idx_q == block_idx_k)
             mask_kj = is_kj_q & (
-                # full prompt visible to non-prompt queries
-                is_prompt_k |
-                # across windows: only last_* from earlier windows
-                prev_windows_last |
-                # within window: only the immediately previous k_{j-1}
-                within_window_prev_k_immediate |
-                # causal inside its own k_j block
-                (same_kj_block & (k >= ks_per_q) & (k <= q))
+                is_prompt_k |                # full prompt visible to non-prompt queries
+                prev_windows_last |          # across windows: last_* only
+                within_window_prev_k |       # within window: ALL prior k_i..k_{j-1}
+                (same_kj_block & (k >= ks_per_q) & (k <= q))  # causal inside own k_j
             )
 
-            # ----- last_j queries -----
+            # ---------- last_j queries ----------
             # within-window previous last_{i .. j-1}
             within_window_prev_last = (
-                is_lastj_k &
-                # first last in window is 2*i+1
-                (block_idx_k >= (window_start_block + 1)) &
-                # strictly before current j
-                (block_idx_k < 2 * j_q)                     
+                is_lastj_k
+                & (block_idx_k >= (window_start_block + 1))  # first last in window is 2*i+1
+                & (block_idx_k <  (2 * j_q))                 # strictly before current j
             )
 
             same_lastj_block = is_lastj_k & (block_idx_q == block_idx_k)
@@ -822,7 +814,7 @@ class CllmTrainer(Trainer):
                 reduction="mean",
                 label_smoothing=0.0,
                 ignore_index=-100,
-            ) * 10
+            ) * 1
 
         # ========== Consistency loss ==========
         T_soft = getattr(self.args, "distill_temperature", 1.0)
