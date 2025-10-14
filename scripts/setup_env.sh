@@ -1,9 +1,9 @@
 sudo apt-get update -y
+sudo apt install python3.12-venv
 
-python3 -m venv cllm2
+python3 -m venv cllm2_venv
 
-pip uninstall torch -y && pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip uninstall torch -y && pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 
-python3.10 -m venv cllm2
-source cllm2/bin/activate
+source cllm2_venv/bin/activate
 pip install -r requirements_gb200.txt
