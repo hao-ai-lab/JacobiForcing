@@ -19,10 +19,12 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved_continuous_drafting import jacobi_forward_greedy
-Qwen2ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
+from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved_multiblock_lookahead import jacobi_forward_greedy_multiblock
+Qwen2ForCausalLM.jacobi_forward_greedy_multiblock = jacobi_forward_greedy_multiblock
 
-# Load dataset
+# ---------------------------
+# Load dataset (first 100)
+# ---------------------------
 df = pd.read_parquet("/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
 df_size = len(df)
 print(f"Loaded HumanEval dataset with {df_size} samples")
@@ -33,9 +35,7 @@ records = df.to_dict(orient="records")
 # ---------------------------
 #model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
 #model_name = "/home/lah003/models/yc-blk32-10k"
-#model_name = "/home/lah003/models/0911_blcksz32_w32_steps58k"
 model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
-#model_name = "/home/lah003/models/0915_w16_blk32_from_scratch_55k"
 
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
@@ -48,12 +48,17 @@ model.eval()
 
 
 eos_id = tokenizer.eos_token_id
-alt_eos_id = 151645  # keep your special EOS as a fallback
+pad_id = tokenizer.pad_token_id
+
+print(f"eos id: {eos_id}")
+print(f"pad id: {pad_id}")
+
+#alt_eos_id = 151645  # keep your special EOS as a fallback
 
 # ---------------------------
 # Generation/profiling config
 # ---------------------------
-n_token_seq_len = 16
+n_token_seq_len = 64
 
 # Safety caps so a sample can't run forever.
 max_new_tokens = 1024     # hard cap on total new tokens per prompt
@@ -78,7 +83,7 @@ Please continue to complete the function. You are not allowed to modify the give
 ```
 """.strip().format(
             row["prompt"].strip()
-        )
+    )
     #prompt = "Respond only in code.\n" + row["prompt"]
 
     messages = [{"role": "user", "content": prompt}]
@@ -108,23 +113,22 @@ Please continue to complete the function. You are not allowed to modify the give
         # Check EOS
         generated_part = generated_ids[0, prompt_len:]
         hit_eos = False
-        if eos_id is not None:
-            hit_eos = (generated_part == eos_id).any().item()
-        if not hit_eos:
-            # allow alternate special EOS id
-            hit_eos = (generated_part == alt_eos_id).any().item()
-
+        hit_eos = (generated_part == eos_id).any().item()
+        
         if hit_eos:
+            print("HITTING EOS, TERMINATING GENERATION...")
             stop_reason = "eos"
             break
         if total_new_tokens >= max_new_tokens:
+            print("EXCEEDING MAX NEW TOKENS COUNT, TERMINATING GENERATION...")
             stop_reason = "max_new_tokens"
             break
         if calls >= max_calls:
+            print("EXCEEDING MAX NEW CALLS COUNT, TERMINATING GENERATION...")
             stop_reason = "max_calls"
             break
         
-        #print(f"\nInit new subsequence {calls}...\n")
+        print(f"\nInit new subsequence {calls}...\n")
 
         ### One diffusion decoding call
         if prefill_phase:
@@ -138,7 +142,7 @@ Please continue to complete the function. You are not allowed to modify the give
             prefill_input_ids = torch.cat((input_ids, prefill_draft_token_ids),dim=-1)
             
             # `jacobi_forward_greedy` will return iteration result from first iteration
-            past_key_values, first_correct_token, prefill_drafted_n_gram, iter_count = model.jacobi_forward_greedy(
+            past_key_values, first_correct_token, prefill_drafted_n_gram, iter_count = model.jacobi_forward_greedy_multiblock(
                 input_ids=prefill_input_ids,
                 attention_mask=attention_mask,
                 past_key_values=None,
@@ -147,10 +151,14 @@ Please continue to complete the function. You are not allowed to modify the give
                 n_token_seq_len=n_token_seq_len,
                 tokenizer=tokenizer,
                 eos_token_id=eos_id,
+                pad_token_id=pad_id,
                 )
             prefill_phase = False
             generated_ids = input_ids
             itr_count = 0
+            
+            #generated_str = ''.join(tokenizer.batch_decode(prefill_drafted_n_gram, skip_special_tokens=False))
+            #print(f'Prefill drafted ngram: {generated_str}')
         else:
             # generation phase
             # ---- Initialize a draft tail (any tokens work; we'll fix on the first pass).
@@ -167,7 +175,7 @@ Please continue to complete the function. You are not allowed to modify the give
                 input_ids = torch.cat((first_correct_token.view(1,-1), q_sampled),dim=-1)
 
             t_gen_start = time.perf_counter()
-            past_key_values, first_correct_token, accepted_n_gram, itr_count = model.jacobi_forward_greedy(
+            past_key_values, first_correct_token, accepted_n_gram, itr_count = model.jacobi_forward_greedy_multiblock(
                 input_ids=input_ids,
                 attention_mask=None,
                 past_key_values=past_key_values,
@@ -176,6 +184,7 @@ Please continue to complete the function. You are not allowed to modify the give
                 n_token_seq_len=n_token_seq_len,
                 tokenizer=tokenizer,
                 eos_token_id=eos_id,
+                pad_token_id=pad_id,
             )
             t_gen_time = time.perf_counter() - t_gen_start
             gen_only_time += t_gen_time
@@ -251,7 +260,7 @@ def extract_python_code(text):
     else:
         return text  # Return orginal one if no match is found
 
-eval_dir = "/home/lah003/data/CLLM2_eval_generations"
+eval_dir = "/home/lah003/data/CLLM2_eval_generations/multiblock_profiling"
 os.makedirs(eval_dir, exist_ok=True)
 
 original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
@@ -266,7 +275,7 @@ for i, original_generation in enumerate(original_generations):
     original_generation['generation'] = processed_generation
 
 # Save processed generations
-save_path = os.path.join(eval_dir, f'running_blk16_430k_distill32_100k_ntok16_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+save_path = os.path.join(eval_dir, f'multiblock_lookahead_n16w16_distill32_k2_r0p8_ntok64_lkahead0p0_ngp8_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 save_jsonl(original_generations, save_path)
 
 print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")

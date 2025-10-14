@@ -19,7 +19,7 @@ def parse_args():
     p.add_argument("--dataset_parquet", type=str,
                    default="/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
     p.add_argument("--model_name", type=str,
-                   default="/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6")
+                   default="/home/lah003/models/0915_w16_blk32_cllm_progressive_21k")
     p.add_argument("--tokenizer_name", type=str,
                    default="/home/lah003/models/Qwen2.5-Coder-7B-Instruct")
     p.add_argument("--eval_dir", type=str,
