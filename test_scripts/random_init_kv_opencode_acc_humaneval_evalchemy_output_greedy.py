@@ -19,7 +19,7 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_legacy import jacobi_forward_greedy
+from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos import jacobi_forward_greedy
 Qwen2ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
 
 # ---------------------------
@@ -34,6 +34,7 @@ records = df.to_dict(orient="records")
 # Load model/tokenizer once
 # ---------------------------
 model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
+#model_name = "/home/lah003/models/yc-blk32-10k"
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
     device_map="cuda",
@@ -50,7 +51,7 @@ alt_eos_id = 151645  # keep your special EOS as a fallback
 # ---------------------------
 # Generation/profiling config
 # ---------------------------
-n_token_seq_len = 16
+n_token_seq_len = 64
 
 # Safety caps so a sample can't run forever.
 max_new_tokens = 1024     # hard cap on total new tokens per prompt
@@ -61,17 +62,23 @@ max_calls = 1024          # hard cap on number of diffusion_decoding calls per p
 # ---------------------------
 all_rows = []
 t0_overall = time.perf_counter()
+
+total_gen_only_time = 0
+
 all_generations = []
 
 for idx, row in tqdm(enumerate(records)):
     task_id = row.get("task_id", f"idx_{idx}")
     #prompt = "You are given a partially completed Python function with the header and the doc string. Complete the following function according to given information:\n\n" + row["prompt"]
-    prompt = """Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
+    prompt = """
+Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
 ```python
 {}
 ```
-""".strip().format(row["prompt"].strip())
-    # prompt = "Respond only in code.\n" + row["prompt"]
+""".strip().format(
+            row["prompt"].strip()
+        )
+    #prompt = "Respond only in code.\n" + row["prompt"]
 
     messages = [{"role": "user", "content": prompt}]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -89,7 +96,10 @@ for idx, row in tqdm(enumerate(records)):
     stop_reason = None
     prefill_phase = True
     generated_ids = input_ids
+    
+    gen_only_time = 0
 
+    t_start = time.time()
     # run until EOS or caps
     while True:
         # Check EOS
@@ -115,7 +125,8 @@ for idx, row in tqdm(enumerate(records)):
 
         ### One diffusion decoding call
         if prefill_phase:
-            past_key_values, first_correct_token, _, itr_count = model.jacobi_forward_greedy(
+            # TODO: pass in random-init draft, pass out iteration result from first iteration
+            past_key_values, first_correct_token, _, iter_count = model.jacobi_forward_greedy(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 past_key_values=None,
@@ -125,17 +136,21 @@ for idx, row in tqdm(enumerate(records)):
                 tokenizer=tokenizer,
                 eos_token_id=eos_id,
                 )
-            prefill_phase=False
-            itr_count=0
+            prefill_phase = False
             generated_ids = input_ids
-            t_start = time.time()
+            itr_count = 0
         else:
             # generation phase
             # ---- Initialize a draft tail (any tokens work; we'll fix on the first pass).
             # We keep your "random from prompt" init to avoid extra forward passes.
-            q_sampled = random.choices(generated_ids[0].tolist(), k=n_token_seq_len-1)
-            q_sampled = torch.tensor(q_sampled, dtype=torch.long, device=model.device).unsqueeze(0)
+            q_sampled = []
+            for _ in range(n_token_seq_len-1):
+                q_sample = torch.tensor([random.choice(generated_ids[0].tolist())], dtype=torch.long, device=model.device).unsqueeze(0)
+                q_sampled.append(q_sample)
+            q_sampled = torch.cat(q_sampled, dim=1)  # shape [1, n_token_seq_len]
             input_ids = torch.cat((first_correct_token.view(1,-1), q_sampled),dim=-1)
+            
+            t_gen_start = time.perf_counter()
             past_key_values, first_correct_token, accepted_n_gram, itr_count = model.jacobi_forward_greedy(
                 input_ids=input_ids,
                 attention_mask=None,
@@ -145,7 +160,10 @@ for idx, row in tqdm(enumerate(records)):
                 n_token_seq_len=n_token_seq_len,
                 tokenizer=tokenizer,
                 eos_token_id=eos_id,
-                )
+            )
+            t_gen_time = time.perf_counter() - t_gen_start
+            gen_only_time += t_gen_time
+            
             generated_ids = torch.cat((generated_ids, accepted_n_gram), dim=-1)
 
         calls += 1
@@ -155,14 +173,17 @@ for idx, row in tqdm(enumerate(records)):
         if added > 0:
             total_new_tokens += added
         prev_len = generated_ids.shape[1]
-
+    
+    # subtract prefill
     total_new_tokens -= 1
     # per-example finalize
     dt = time.time() - t_start
     total_iterations = sum(iters)
-    avg_iter_per_call = (total_iterations / calls) if calls > 0 else float("nan")
-    avg_iter_per_token = (total_iterations / total_new_tokens) if total_new_tokens > 0 else float("nan")
-    toks_per_sec = (total_new_tokens / dt) if dt > 0 else float("nan")
+    avg_iter_per_call = (total_iterations / calls)
+    avg_iter_per_token = (total_iterations / total_new_tokens)
+    toks_per_sec = (total_new_tokens / gen_only_time)
+    
+    total_gen_only_time += gen_only_time
     
     prompt_len = model_inputs["input_ids"].shape[1]
     generated_str = ''.join(tokenizer.decode(generated_ids[0, prompt_len:], skip_special_tokens=False))
@@ -213,7 +234,7 @@ def extract_python_code(text):
     else:
         return text  # Return orginal one if no match is found
 
-eval_dir = "/home/lah003/data/CLLM2_eval_generations/baselines"
+eval_dir = "/home/lah003/data/CLLM2_eval_generations"
 os.makedirs(eval_dir, exist_ok=True)
 
 original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
@@ -228,13 +249,12 @@ for i, original_generation in enumerate(original_generations):
     original_generation['generation'] = processed_generation
 
 # Save processed generations
-save_path = os.path.join(eval_dir, f'greedy_code_only_prompt_humaneval_wo_kv_generation_blk{n_token_seq_len}_{model_name.split("/")[-2]}.jsonl')
+save_path = os.path.join(eval_dir, f'legacy_blk16_400k_ntok64_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 save_jsonl(original_generations, save_path)
 
 print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")
 
 #### ADDED Lines ####
-
 
 # ---------------------------
 # Aggregate + save
@@ -254,7 +274,6 @@ n_eos = len(df_eos)
 n_total = len(df_profile)
 
 print("\n=== Diffusion Decoding Profiling — EOS-only ===")
-print(f'Mode name: {model_name.split("/")[-2]}')
 print(f"Examples (eos): {n_eos} / {n_total}   Total wall time: {t_overall:.2f}s")
 print(f"Avg new tokens / prompt: {_safe_mean(df_eos['new_tokens']):.2f}")
 print(f"Avg calls / prompt: {_safe_mean(df_eos['calls']):.2f}")
@@ -267,4 +286,4 @@ print("\nStop reasons (all examples):")
 print(df_profile['stop_reason'].value_counts())
 
 # Optional: save EOS-only rows too
-df_eos.to_csv("diffusion_profile_humaneval100_eos.csv", index=False)
+df_eos.to_csv("diffusion_profile_greedy_humaneval_eos.csv", index=False)
