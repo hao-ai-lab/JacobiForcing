@@ -34,8 +34,12 @@ records = df.to_dict(orient="records")
 #model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
 #model_name = "/home/lah003/models/yc-blk32-10k"
 #model_name = "/home/lah003/models/0911_blcksz32_w32_steps58k"
-model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
+#model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
 #model_name = "/home/lah003/models/0915_w16_blk32_from_scratch_55k"
+
+#model_name = "/home/lah003/models/progressive_noise_cllm2_mask_1m_steps"
+#model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
+model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n16-distill-n32w16-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-212000"
 
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
@@ -43,7 +47,7 @@ model = Qwen2ForCausalLM.from_pretrained(
     torch_dtype=torch.bfloat16,
     attn_implementation="flash_attention_2"
 )
-tokenizer = AutoTokenizer.from_pretrained("/home/lah003/models/Qwen2.5-Coder-7B-Instruct")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct")
 model.eval()
 
 
@@ -53,7 +57,7 @@ alt_eos_id = 151645  # keep your special EOS as a fallback
 # ---------------------------
 # Generation/profiling config
 # ---------------------------
-n_token_seq_len = 16
+n_token_seq_len = 64
 
 # Safety caps so a sample can't run forever.
 max_new_tokens = 1024     # hard cap on total new tokens per prompt
@@ -251,7 +255,7 @@ def extract_python_code(text):
     else:
         return text  # Return orginal one if no match is found
 
-eval_dir = "/home/lah003/data/CLLM2_eval_generations"
+eval_dir = "/home/lah003/data/CLLM2_eval_generations/baselines"
 os.makedirs(eval_dir, exist_ok=True)
 
 original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
@@ -266,7 +270,7 @@ for i, original_generation in enumerate(original_generations):
     original_generation['generation'] = processed_generation
 
 # Save processed generations
-save_path = os.path.join(eval_dir, f'running_blk16_430k_distill32_100k_ntok16_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+save_path = os.path.join(eval_dir, f'oct_n16w16_distilln32w16_212kstps_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 save_jsonl(original_generations, save_path)
 
 print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")

@@ -146,13 +146,13 @@ def jacobi_forward_greedy_multiblock(
     past_key_values: Optional[Cache] = None,
     use_cache: Optional[bool] = None,
     prefill_phase: Optional[bool] = False,
-    n_token_seq_len: int = 64,
+    n_token_seq_len: int = 32,
     # multi-block controls
     K: int = 2,                 # max number of concurrent blocks (1 RA + K-1 pseudo)
     r: float = 0.8,             # spawn threshold as a fraction of n_token_seq_len
     # lookahead-related
     lookahead_start_ratio = 0.0,
-    n_gram_pool_size = 8,
+    n_gram_pool_size = 4,
     # sampling knobs (kept for parity; we run greedy inside)
     temperature: float = 1.0,
     top_p: float = 0.85,

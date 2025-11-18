@@ -23,14 +23,40 @@ from typing import Tuple
 import torch
 
 # --- utilities: cache trimming for rejected tails ---
-def _delete_false_key_value(self: DynamicCache, num_of_false_tokens: int) -> Tuple[torch.Tensor, torch.Tensor]:
-    if num_of_false_tokens <= 0:
-        return
-    for layer_idx in range(len(self.key_cache)):
-        self.key_cache[layer_idx]  = self.key_cache[layer_idx][..., :-num_of_false_tokens, :]
-        self.value_cache[layer_idx] = self.value_cache[layer_idx][..., :-num_of_false_tokens, :]
-DynamicCache.delete_false_key_value = _delete_false_key_value
+#def _delete_false_key_value(self: DynamicCache, num_of_false_tokens: int) -> Tuple[torch.Tensor, torch.Tensor]:
+#    if num_of_false_tokens <= 0:
+#        return
+#    for layer_idx in range(len(self.key_cache)):
+#        self.key_cache[layer_idx]  = self.key_cache[layer_idx][..., :-num_of_false_tokens, :]
+#        self.value_cache[layer_idx] = self.value_cache[layer_idx][..., :-num_of_false_tokens, :]
 
+#DynamicCache.delete_false_key_value = _delete_false_key_value
+
+# --- optimized KV trimmer ---
+def _delete_false_key_value(self: DynamicCache, num_of_false_tokens: int) -> None:
+    # No-op guards
+    if num_of_false_tokens <= 0 or not self.key_cache:
+        return
+
+    kc, vc = self.key_cache, self.value_cache
+    # Infer current seq_len from the first layer; all layers align in HF caches
+    cur_len = kc[0].size(-2)
+    if num_of_false_tokens >= cur_len:
+        # Share a zero-length view across all layers
+        empty_k = kc[0].narrow(-2, 0, 0)
+        empty_v = vc[0].narrow(-2, 0, 0)
+        for i in range(len(kc)):
+            kc[i] = empty_k
+            vc[i] = empty_v
+        return
+
+    new_len = cur_len - num_of_false_tokens
+    # Use .narrow (view) rather than negative slicing; compute once, apply to all layers
+    for i in range(len(kc)):
+        kc[i] = kc[i].narrow(-2, 0, new_len)
+        vc[i] = vc[i].narrow(-2, 0, new_len)
+
+DynamicCache.delete_false_key_value = _delete_false_key_value
 
 # --- utilities: lookahead candidate building from n-gram pool ---
 def _build_candidates(n_gram_pool: deque, next_token: torch.Tensor, out: torch.Tensor, nearest: bool=False):
@@ -123,7 +149,7 @@ def jacobi_forward_greedy_multiblock(
     n_token_seq_len: int = 64,
     # multi-block controls
     K: int = 2,                 # max number of concurrent blocks (1 RA + K-1 pseudo)
-    r: float = 0.8,             # spawn threshold as a fraction of n_token_seq_len
+    r: float = 0.95,             # spawn threshold as a fraction of n_token_seq_len
     # lookahead-related
     lookahead_start_ratio = 0.0,
     n_gram_pool_size = 4,
@@ -350,6 +376,47 @@ def jacobi_forward_greedy_multiblock(
 
         return out, spans
 
+    def _first_row_2d(x: torch.Tensor) -> torch.Tensor:
+        if x.numel() == 0:
+            return x
+        if x.dim() != 2:
+            raise ValueError(f"_first_row_2d expects [B, L], got {tuple(x.shape)}")
+        return x[:1, :]
+
+    def _concat_all_blocks_seq(ra_rejected_tail: torch.Tensor) -> torch.Tensor:
+        """
+        Returns a single [1, L_total] tensor:
+        [ rejected RA tail ] ++ Σ_over_pseudo_blocks( accepted_prefix ++ draft_tail )
+        Excludes any RA accepted prefix or RA draft.
+        Uses only the first batch row from each tensor to keep shape [1, L].
+        """
+        seq = torch.empty((1, 0), device=device, dtype=input_ids.dtype)
+
+        # 0) start with the RA rejected tail
+        if ra_rejected_tail.numel() > 0:
+            seq = torch.cat([seq, _first_row_2d(ra_rejected_tail)], dim=1)
+
+        # 1) append all pseudo blocks (need_reverify==True, b != RA)
+        for bb in range(num_blocks):
+            if bb == RA or not need_reverify[bb]:
+                continue
+
+            acc = out_acc[bb]
+            if acc.numel() > 0:
+                seq = torch.cat([seq, _first_row_2d(acc)], dim=1)
+
+            q = q_draft[bb]
+            if q.numel() > 0:
+                seq = torch.cat([seq, _first_row_2d(q)], dim=1)
+
+        # strip PADs to avoid polluting candidates
+        if pad_token_id is not None and seq.numel() > 0:
+            mask = (seq != pad_token_id)
+            seq = seq[:, mask[0]]
+
+        assert seq.dim() == 2 and seq.size(0) == 1, f"concat seq must be [1, L], got {tuple(seq.shape)}"
+        return seq
+
 
     iters = 0
     while iters < max_iteration_count:
@@ -499,8 +566,22 @@ def jacobi_forward_greedy_multiblock(
                 q_draft[b] = torch.cat([nxt, greedy[:, acc_len:-1]], dim=-1)
                 
                 # n-gram pool only serves for the real active block
+                #if b == RA:
+                #    n_gram_pool.append(greedy[:, acc_len:-1])
+                
                 if b == RA:
-                    n_gram_pool.append(greedy[:, acc_len:-1])
+                    # RA’s rejected greedy tail
+                    tail = greedy[:, acc_len:-1]
+
+                    # 1) Add (rejected tail + all pseudo blocks) to the pool
+                    concat_seq = _concat_all_blocks_seq(tail)
+                    if concat_seq.numel() > 0:
+                        n_gram_pool.append(concat_seq)
+
+                    # 2) Then add the RA’s rejected greedy tail itself
+                    if tail.numel() > 0:
+                        n_gram_pool.append(tail)
+
                 
                 ### ADDED: Construct more drafts candidates based on n_gram_pool ###
                 # spawn extra candidates after a fraction of block is accepted

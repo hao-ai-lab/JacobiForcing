@@ -3,3 +3,7 @@ data/collected_diffusion_trajectory/*
 cllm2
 wandb
 ckpts
+*.png
+*.csv
+*.txt
+

@@ -1,12 +1,12 @@
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export WANDB_PROJECT=cllm2_training
-export WANDB_RUN_NAME="sft_baseline_siqi_data_v1"
+export WANDB_RUN_NAME="sft_baseline_data_v1"
 
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
 
 model_path="/checkpoint/lhu/models/OpenThinker2-7B"
 trajectory_file="/checkpoint/lhu/data/postprocessed_trajectory_collection_merged/openhought2_sft_bs_k8s_postprocessed_merged_all.jsonl"
-output_path="/checkpoint/lhu/train_ckpts/cllm/sft_baseline_siqi_data_v1"
+output_path="/checkpoint/lhu/train_ckpts/cllm/sft_baseline_data_v1"
 qlora=False
 
 torchrun --nnodes=1 --nproc_per_node=8 --rdzv_id=101 \
