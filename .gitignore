@@ -7,4 +7,5 @@ ckpts
 *.png
 *.csv
 *.txt
+*.jsonl
 
