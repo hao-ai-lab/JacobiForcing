@@ -90,7 +90,7 @@ def main():
     p.add_argument("--baseline-throughput", type=float, default=None)
     p.add_argument("--baseline-pass1", type=float, default=None)
     p.add_argument("--size-scale", type=float, default=80.0)
-    p.add_argument("--label-offset-x", type=float, default=-6.0)
+    p.add_argument("--label-offset-x", type=float, default=-8.0)
     p.add_argument("--label-offset-y", type=float, default=1.0)
     args = p.parse_args()
 
@@ -114,6 +114,8 @@ def main():
 
     # Labels near each point
     for i, r in df_delta.iterrows():
+        if "Jacobi Forcing" in df_delta.loc[i, "technique"]:
+            args.label_offset_x -= 30
         ax.annotate(
             df_delta.loc[i, "technique"],
             xy=(r["delta_throughput"], r["delta_pass1"]),
@@ -136,7 +138,7 @@ def main():
     )
     
     ax.annotate(
-        "Baseline (41.3 t/s, 88.4%)",
+        "Baseline (41.3 t/s, 87.8%)",
         xy=(0, 0),
         xytext=(-40, 4),         # adjust offsets if needed
         fontsize=16,
@@ -167,7 +169,7 @@ def main():
             ax.annotate(
                 f"{abs_tps:.1f} t/s, {abs_acc:.1f}%",
                 xy=(x_star, y_star),
-                xytext=(x_star - 25, y_star - 10),
+                xytext=(x_star - 26.75, y_star - 8.0),
                 fontsize=16,
                 bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="gray", alpha=0.8),
                 arrowprops=dict(arrowstyle="->", lw=1)

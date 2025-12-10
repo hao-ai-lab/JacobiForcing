@@ -8,4 +8,6 @@ ckpts
 *.csv
 *.txt
 *.jsonl
+profiling_results/*
+logs/*
 

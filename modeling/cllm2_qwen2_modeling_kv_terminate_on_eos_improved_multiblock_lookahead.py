@@ -123,7 +123,7 @@ def jacobi_forward_greedy_multiblock(
     n_token_seq_len: int = 64,
     # multi-block controls
     K: int = 2,                 # max number of concurrent blocks (1 RA + K-1 pseudo)
-    r: float = 0.8,             # spawn threshold as a fraction of n_token_seq_len
+    r: float = 0.85,             # spawn threshold as a fraction of n_token_seq_len
     # lookahead-related
     lookahead_start_ratio = 0.0,
     n_gram_pool_size = 4,

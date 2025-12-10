@@ -19,7 +19,7 @@ def parse_args():
     p.add_argument("--dataset_parquet", type=str,
                    default="/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
     p.add_argument("--model_name", type=str,
-                   default="/home/lah003/models/0915_w16_blk32_cllm_progressive_21k")
+                   default="/home/lah003/models/Qwen2.5-Coder-7B-Instruct")
     p.add_argument("--tokenizer_name", type=str,
                    default="/home/lah003/models/Qwen2.5-Coder-7B-Instruct")
     p.add_argument("--eval_dir", type=str,
@@ -183,6 +183,8 @@ def main():
                 print(f"====[{idx+1}/{len(records)}] task_id={task_id} "
                       f"new_toks={new_tokens} gen_time={gen_time:.2f}s toks/sec={toks_per_sec:.2f} "
                       f"reason={stop_reason}====")
+            
+            break
 
     t_overall = time.perf_counter() - t0_overall
 

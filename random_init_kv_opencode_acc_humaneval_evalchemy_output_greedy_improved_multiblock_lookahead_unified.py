@@ -42,10 +42,13 @@ records = df.to_dict(orient="records")
 #model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
 
 #model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n32w16-n16distill-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-212000"
-model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n32w16-n16distill-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-344092"
+model_name = "/raid/lah003/shiftedattn-10-16-7b-qwen2p5-coder-n32w16-n16distill-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-344092"
 
 #model_name = "/home/lah003/models/shiftedattn-10-23-7b-qwen2p5-coder-n16w16-distilln32w16-ar-1-cyclic-noise-all-1e-6/ckpt_218000"
 #model_name = "/home/lah003/models/shiftedattn-10-23-7b-qwen2p5-coder-n16w16-distilln32w16-ar-1-cyclic-noise-all-1e-6/ckpt_344092"
+
+#model_name ="/raid/lah003/shiftedattn-11-21-7b-qwen2p5-coder-n16w16-distilln32w16-ar-1-cyclic-noise-all-1e-6/checkpoint-150000"
+#model_name = "/raid/lah003/shiftedattn-11-21-7b-qwen2p5-coder-n16w16-distilln64w32-ar-1-cyclic-noise-all-5e-7/checkpoint-150000"
 
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
@@ -337,14 +340,19 @@ for i, original_generation in enumerate(original_generations):
 #save_path = os.path.join(eval_dir, f'oct_original_ckpt_distilln32w16_ckpt344092_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 
 #save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_oct_n16w16_distilln32w16_ckpt218000_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
-#save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_oct_n16w16_distilln32w16_ckpt344092_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_oct_n16w16_distilln32w16_ckpt344092_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 
 #save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_sep_n16w16_distilln32w16_ckpt20k_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
-save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_oct_original_ckpt_distilln32w16_ckpt212000_multiblock_lookahead_k2_r0p8_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 #save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_oct_original_ckpt_distilln32w16_ckpt344092_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 
 
+#save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_oct_original_ckpt_distilln32w16_ckpt344092_multiblock_lookahead_k2_r0p8_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+#save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_nov_25_ckpt_distilln32w16_ckpt150000_lr_1e-6_multiblock_lookahead_k2_r0p8_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+
+#save_path = os.path.join(eval_dir, f'mod_longer_fastest_prompt_nov_25_ckpt_distilln64w32_ckpt150000_lr_5e-7_multiblock_lookahead_k2_r0p8_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+
 #save_path = os.path.join(eval_dir, f'base_path_oct_n16w16_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+
 
 
 save_jsonl(original_generations, save_path)
