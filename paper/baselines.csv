@@ -1,0 +1,8 @@
+technique,throughput_tps,pass1,train_tokens_B
+qwen-2.5-coder-7b-instruct,41.3,87.8,0
+llada-7b-instruct,20.0,45.1,0.001
+dream-7b-instruct,3.0,63.4,580
+dream-coder-7b-instruct,5.0,82.9,322
+fast-dllm-v2,100.0,63.4,1
+SDAR,21.5,78.7,50
+Jacobi Forcing (ours),163.9,83.5,1
