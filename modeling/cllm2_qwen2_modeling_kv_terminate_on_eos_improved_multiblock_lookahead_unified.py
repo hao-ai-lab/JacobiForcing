@@ -155,7 +155,7 @@ def jacobi_forward_greedy_multiblock(
     n_gram_pool_size = 4,
     # sampling knobs (kept for parity; we run greedy inside)
     temperature: float = 1.0,
-    top_p: float = 0.85,
+    top_p: float = 0.2,
     top_k: Optional[int] = None,
     repetition_penalty: Optional[float] = None,
     lenience: float = 1.0,

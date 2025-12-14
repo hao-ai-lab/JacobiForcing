@@ -1,6 +1,5 @@
 import time
 import threading
-from pathlib import Path
 
 import torch
 import streamlit as st
@@ -8,6 +7,7 @@ from transformers import Qwen2ForCausalLM, AutoTokenizer
 from transformers.generation.streamers import TextIteratorStreamer
 
 import sys
+from pathlib import Path
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
@@ -25,7 +25,7 @@ def load_model_and_tokenizer(model_path: str, tokenizer_path: str):
     """
     # Detect device (prefer cuda:0)
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda"
     elif torch.backends.mps.is_available():
         device = "mps"
     else:
@@ -59,7 +59,6 @@ def load_model_and_tokenizer(model_path: str, tokenizer_path: str):
         attn_implementation=attn_impl,
     )
 
-    model.to(device)
     model.eval()
 
     # Load tokenizer
@@ -81,9 +80,9 @@ def stream_answer_hf_generate(
     device: str,
     messages,
     placeholder,
-    max_new_tokens: int = 512,
+    max_new_tokens: int = 1024,
     temperature: float = 0.8,
-    top_p: float = 0.95,
+    top_p: float = 0.2,
 ):
     """
     Streaming generation using HuggingFace generate() + TextIteratorStreamer.
@@ -203,7 +202,7 @@ max_new_tokens = st.sidebar.slider(
     "Max new tokens per reply",
     min_value=32,
     max_value=2048,
-    value=512,
+    value=1024,
     step=32,
 )
 temperature = st.sidebar.slider(
@@ -213,13 +212,15 @@ temperature = st.sidebar.slider(
     value=0.0,
     step=0.05,
 )
-top_p = st.sidebar.slider(
-    "Top-p",
-    min_value=0.1,
-    max_value=1.0,
-    value=0.95,
-    step=0.05,
-)
+
+#top_p = st.sidebar.slider(
+#    "Top-p",
+#    min_value=0.1,
+#    max_value=1.0,
+#    value=0.20,
+#    step=0.05,
+#)
+top_p = 0.20
 
 use_jacobi = st.sidebar.checkbox(
     "jacobi decoding (MR)", value=True
@@ -296,7 +297,7 @@ if st.sidebar.button("Reset conversation & stats"):
     st.session_state.messages = []
     st.session_state.total_tokens = 0
     st.session_state.total_time = 0.0
-    st.experimental_rerun()
+    st.rerun()
 
 # ---------------- METRIC PLACEHOLDERS + helper ----------------
 
