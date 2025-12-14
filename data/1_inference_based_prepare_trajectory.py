@@ -15,6 +15,7 @@ import copy
 
 import numpy as np
 from einops import rearrange
+from torch import nn
 import torch.nn.functional as F
 import math
 import os
@@ -24,26 +25,35 @@ from pathlib import Path
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
+# logits processors
+from transformers.generation.logits_process import (
+    LogitsProcessorList,
+    RepetitionPenaltyLogitsProcessor,
+    TemperatureLogitsWarper,
+    TopKLogitsWarper,
+    TopPLogitsWarper,
+)
+
 # sampling helpers
-def log(t, eps = 1e-20):
-    return torch.log(t.clamp(min = eps))
+# def log(t, eps = 1e-20):
+#     return torch.log(t.clamp(min = eps))
 
-def gumbel_noise(t):
-    noise = torch.zeros_like(t).uniform_(0, 1)
-    return -log(-log(noise))
+# def gumbel_noise(t):
+#     noise = torch.zeros_like(t).uniform_(0, 1)
+#     return -log(-log(noise))
 
-def gumbel_sample(t, temperature = 1., dim = -1):
-    return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim = dim)
+# def gumbel_sample(t, temperature = 1., dim = -1):
+#     return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim = dim)
 
-def top_k(logits, thres = 0.9):
-    k = math.ceil((1 - thres) * logits.shape[-1])
-    val, ind = torch.topk(logits, k)
-    probs = torch.full_like(logits, float('-inf'))
-    probs.scatter_(-1, ind, val)
-    return probs
+# def top_k(logits, thres = 0.9):
+#     k = math.ceil((1 - thres) * logits.shape[-1])
+#     val, ind = torch.topk(logits, k)
+#     probs = torch.full_like(logits, float('-inf'))
+#     probs.scatter_(-1, ind, val)
+#     return probs
 
-def safe_div(num, den, eps = 1e-10):
-    return num / max(den, eps)
+# def safe_div(num, den, eps = 1e-10):
+#     return num / max(den, eps)
 
 def find_first_true_index(bool_tensor, dim = -1):
     return (bool_tensor.cumsum(dim = dim) == 0).sum(dim = dim)
@@ -56,9 +66,12 @@ def get_diffusion_decoding_trajectory(
     input_ids,
     attention_mask,
     n_token_seq_len,
-    filter_thres=0.9,
-    temperature = 1.,
+    temperature = 0.9,
+    top_p = 0.9, 
+    top_k = 20,
+    repetition_penalty = 1.05, 
     lenience = 1.,
+    accept_threshold = 0.1,
     ):
 
     batch, prompt_len, out, device = 1, int(torch.sum(attention_mask[0])), input_ids.clone(), input_ids.device
@@ -71,7 +84,7 @@ def get_diffusion_decoding_trajectory(
     for _ in range(n_token_seq_len):
         q_sample = torch.tensor([random.choice(input_ids[0].tolist())]).to(dtype=torch.long, device=model.device).unsqueeze(dim=0)
         out = torch.cat((out, q_sample), dim=1)
-        q_logits = torch.full((batch, 151936), float('-inf'), device=model.device)
+        q_logits = torch.full((batch, len(tokenizer)), float('-inf'), device=model.device)
         q_logits.scatter_(1, q_sample, 0.0) 
         q_sampled.append(q_sample)
         q_logits_all.append(q_logits)
@@ -80,7 +93,17 @@ def get_diffusion_decoding_trajectory(
     q_logits = q_logits_all
     trajectory.append(out)
 
-
+    ### Initialize LogitsProcessor with GenerationConfig
+    logits_processors = LogitsProcessorList()
+    if repetition_penalty is not None and repetition_penalty != 1.0:
+        logits_processors.append(RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty))
+    if temperature is not None and temperature != 1.0:
+        logits_processors.append(TemperatureLogitsWarper(temperature))
+    if top_k is not None and top_k != 0:
+        logits_processors.append(TopKLogitsWarper(top_k=top_k, min_tokens_to_keep=1))
+    if top_p is not None and top_p < 1.0:
+        logits_processors.append(TopPLogitsWarper(top_p=top_p, min_tokens_to_keep=1))
+    
     ### Diffusion decoding
     total_accepted = 0
     itr=0
@@ -90,60 +113,78 @@ def get_diffusion_decoding_trajectory(
         out_attention_mask = torch.full_like(out, 1).to(model.device)
         logits = model(out, out_attention_mask).logits
         p_logits = logits[:, prompt_len+total_accepted-1:, :]
-        p_logits = top_k(p_logits, thres = filter_thres)
+        # only support bsz=1 now
+        p_scores = logits_processors(out, p_logits.squeeze(dim=0)).unsqueeze(dim=0)
+        q_scores = logits_processors(out, q_logits.squeeze(dim=0)).unsqueeze(dim=0)
 
         ### prob and prob of draft distribution (p(x) and q(x))
-        p_prob = safe_div(p_logits, temperature).softmax(dim = -1)[:, :, :len(tokenizer)]
-        q_prob = safe_div(q_logits, temperature).softmax(dim = -1)[:, :, :len(tokenizer)]
+        p_prob = nn.functional.softmax(p_scores, dim=-1)[:, :, :len(tokenizer)]
+        q_prob = nn.functional.softmax(q_scores, dim=-1)[:, :, :len(tokenizer)]
 
         p, prob_next = p_prob[:, :-1], p_prob[:, -1]
 
         p = p.gather(-1, q_sampled.unsqueeze(dim=-1))
         q = q_prob.gather(-1, q_sampled.unsqueeze(dim=-1)) * lenience
-
+        
         p, q = [rearrange(t, 'b n 1 -> b n') for t in (p, q)]
         r = random_uniform = torch.zeros_like(q).float().uniform_(0, 1)
+        threshold = torch.ones_like(q).float() * accept_threshold
 
-        accepted = find_first_true_index(r > (p / q))
-        total_accepted += int(accepted[0])
-        accepted.clamp_(max = n_token_seq_len - 1)
+        accepted = find_first_true_index(
+                (r > (p / q)) | (p < threshold)
+            )
 
+        num_accepted = int(accepted[0])
+        total_accepted += num_accepted
         out = out[:, :prompt_len+total_accepted]
 
+        has_rejected = (num_accepted < q.shape[1])
+
         ### sample the additional token to better bound the worst case
-        if int(accepted[0]) == q_prob.shape[1]:
-            trajectory.append(out)
-            continue
-        else:
-            adjusted_prob = F.relu(p_prob[:, int(accepted[0]), :] - q_prob[:, int(accepted[0]), :])
-            adjusted_prob = adjusted_prob / adjusted_prob.sum(dim = -1, keepdim = True)
-
-            has_rejected = torch.tensor(total_accepted < n_token_seq_len, device=out.device)
-            prob_next = torch.where(
-                rearrange(has_rejected, '... -> ... 1'),
-                adjusted_prob,
-                prob_next
-            )
-            next_token = torch.multinomial(prob_next, 1)
-
+        sample_additional_token = False
+        if num_accepted == 0: 
+            next_token = torch.multinomial(p_prob[:, num_accepted, :], num_samples=1)
             out = torch.cat((out, next_token), dim = -1)
             total_accepted += 1
+            sample_additional_token = True
+        elif has_rejected:
+            adjusted_prob = F.relu(p_prob[:, num_accepted, :] - q_prob[:, num_accepted, :])
+            adjusted_prob = adjusted_prob / adjusted_prob.sum(dim = -1, keepdim = True)
+            prob_next = adjusted_prob
+            # if all p_prob < q_prob, prob_next becomes nan, then we do not sample the additional token
+            if torch.isnan(prob_next).any():
+                pass
+            else:
+                next_token = torch.multinomial(prob_next, num_samples=1)
+                out = torch.cat((out, next_token), dim = -1)
+                total_accepted += 1                
+                sample_additional_token = True
 
-        ### update q(x) with self-speculated p(x) and sample new drafts tokens
-        q_logits = p_logits[:, int(accepted[0])+1:-1, :]
-        q_sampled = gumbel_sample(q_logits, temperature = temperature, dim = -1)
-        out = torch.cat((out, q_sampled), dim = -1)
-        trajectory.append(out)
-        itr+=1
-        # print(f'Itr: {itr}, Accepted tokens: {int(accepted[0])}')
-    
+        if not has_rejected:
+            next_token = torch.multinomial(prob_next, num_samples=1)
+            out = torch.cat((out, next_token), dim = -1)
+            total_accepted += 1
+            trajectory.append(out)
+            continue
+
+        if has_rejected:
+            ### update q(x) with self-speculated p(x) and sample new drafts tokens
+            if sample_additional_token:
+                q_logits = p_logits[:, num_accepted+1:-1, :]
+                q_probs = p_prob[:, num_accepted+1:-1, :]
+            else:
+                q_logits = p_logits[:, num_accepted:-1, :]
+                q_probs = p_prob[:, num_accepted:-1, :]
+            q_sampled = torch.multinomial(q_probs.squeeze(dim=0), num_samples=1).reshape(1, -1)
+            out = torch.cat((out, q_sampled), dim = -1)
+            trajectory.append(out)
+            itr+=1
+        
     eos_reached = len(torch.where(trajectory[-1] == tokenizer.eos_token_id)[0])>0
     generated_str = ''.join(tokenizer.batch_decode(out[0, prompt_len:], skip_special_tokens=False))
-    # print(generated_str)
     print(f'Converge in {itr} steps')
 
     return trajectory, eos_reached, itr
-
 
 def preprocess_openthoughts2(data, tokenizer):
     
@@ -254,7 +295,7 @@ def main(filename, model, tokenizer, n_token_seq_len, max_new_seq_len, use_aug, 
                 new_data.append(dic)
     
         # print('Diffusion trajectory has been collected.')
-        save_path = 'data/collected_diffusion_trajectory/'    
+        save_path = 'data/decode_new_ver_collected_diffusion_trajectory/'    
         new_file_name = f"{filename.lower().split('/')[-1]}_jacobi_n_token_seq_len{n_token_seq_len}_labels{use_labels}_max_seq_len{max_new_seq_len}_{data_bos_id}_{data_eos_id}.json"
         new_file_path = os.path.join(save_path, new_file_name)
     
