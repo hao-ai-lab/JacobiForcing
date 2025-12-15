@@ -9,7 +9,7 @@
      ========================= -->
 <p align="center">
   <a href="http://arxiv.org/abs/XXXX.XXXXX">
-    <img src="https://flat.badgen.net/badge/assets/arXiv/red" alt="Paper">
+    <img src="https://flat.badgen.net/badge/Paper/arXiv/red" alt="Paper">
   </a>
   <a href="https://hao-ai-lab.github.io/blogs/jacobi-forcing/">
     <img src="https://flat.badgen.net/badge/Blog/Jacobi%20Forcing/blue" alt="Blog">
@@ -68,6 +68,10 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
 </p>
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> main
 ## Installation
 
 
