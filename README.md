@@ -139,7 +139,7 @@ Then adapt from the script `generate_trajectory/generation/qwen2_modeling_jacobi
 - step 2: training sequence packing and mapping noise schedule to training sequence.
 
 ```
-python3 generate_trajectory/generation/2_prepare_efficient_cllm_training_data_progressive_noise_window.py \
+python3 generate_trajectory/data/2_prepare_efficient_cllm_training_data_progressive_noise_window.py \
     --input_path {trajectory_data_path} \
     --output_path {output_training_seq_path} \
     --n_token_seq_length {block_size} \
