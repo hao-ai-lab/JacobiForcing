@@ -116,15 +116,15 @@ pip install -r requirements.txt
 ### Base Models
 | Size | Domain | HuggingFace Repo                 |
 | ---- | ------ | -------------------------------- |
-| 7B   | Code   | `Qwen/Qwen2.5-Coder-7B-Instruct` |
-| 7B   | Math   | `Qwen/Qwen2.5-Math-7B-Instruct`  |
+| 7B   | Code   | [`Qwen/Qwen2.5-Coder-7B-Instruct`](https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct) |
+| 7B   | Math   | [`Qwen/Qwen2.5-Math-7B-Instruct`](https://huggingface.co/Qwen/Qwen2.5-Math-7B-Instruct)  |
 
 
 ### Jacobi Forcing Models
 | Size | Domain | Data | HuggingFace Repo                    |
 | ---- | ------ | ------ | ------------------------ |
-| 7B   | Code | [OpenCodeInstruct](https://huggingface.co/datasets/nvidia/OpenCodeInstruct)  | [JacobiForcing_Coder_7B_v1](https://huggingface.co/JacobiForcing/JacobiForcing_Coder_7B_v1) |
-| 7B   | Math | [OpenThoughts2](https://huggingface.co/datasets/open-thoughts/OpenThoughts2-1M)  | [JacobiForcing_Coder_7B_v1](https://huggingface.co/JacobiForcing/JacobiForcing_Math_7B_v1)  |
+| 7B   | Code | [OpenCodeInstruct](https://huggingface.co/datasets/nvidia/OpenCodeInstruct)  | [`JacobiForcing_Coder_7B_v1`](https://huggingface.co/JacobiForcing/JacobiForcing_Coder_7B_v1) |
+| 7B   | Math | [OpenThoughts2](https://huggingface.co/datasets/open-thoughts/OpenThoughts2-1M) (math split)  | [`JacobiForcing_Math_7B_v1`](https://huggingface.co/JacobiForcing/JacobiForcing_Math_7B_v1)  |
 
 ## Usage
 
