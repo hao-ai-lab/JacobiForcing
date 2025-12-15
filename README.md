@@ -68,15 +68,6 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
 </p>
 
 
-| Method        | Attention      | Parallelism                      | Training Cost | Single-model Decoding (no draft–verifier)   | Efficient KV Reuse        | Real Speedup | Generation Quality         |
-|----------------------|------------------------|-----------------------------------------------|------------------------------------|-------------------------------------------|----------------------|-------------------------------|---------------------------|
-| **AR**        | Causal | None                          | None                                            | No   |  Yes               |No            | Lossless            |
-| **SD** | Causal                 | Yes             | No to Small: Draft model FT        | $\textcolor{red}{\text{No}}$ | Yes     | $<3.5\times$ | Lossless            | 
-| **dLLMs**            | Non-causal    | Yes   | High: from scratch or heavy diffusion FT      | Yes | $\textcolor{red}{\text{No}}$ | $< 3\times$ | Low to near-AR quality |
-| **Jacobi Forcing**   | Causal                 | Yes   | Small: noise-conditioned FT on trajectories | $\textcolor{green}{\text{Yes}}$ |  $\textcolor{green}{\text{Yes}}$   |  $\sim3-4\times$    | near-AR quality   |
-
-
-
 ## Installation
 
 
@@ -261,6 +252,16 @@ Overall, Jacobi Forcing model consistently delivers **up to $3-4\times$ wall-clo
 
 
 On a single B200 GPU with much higher FLOPs, the same Jacobi Forcing model with multiblock + rejection recycling can achieve an even more significant speedup at around 330 tokens/s (vs. around 80 tokens/s using AR), showing that the design continues to scale on newer accelerators.
+
+
+| Method        | Attention      | Parallelism                      | Training Cost | Single-model Decoding (no draft–verifier)   | Efficient KV Reuse        | Real Speedup | Generation Quality         |
+|----------------------|------------------------|-----------------------------------------------|------------------------------------|-------------------------------------------|----------------------|-------------------------------|---------------------------|
+| **AR**        | Causal | None                          | None                                            | No   |  Yes               |No            | Lossless            |
+| **SD** | Causal                 | Yes             | No to Small: Draft model FT        | $\textcolor{red}{\text{No}}$ | Yes     | $<3.5\times$ | Lossless            | 
+| **dLLMs**            | Non-causal    | Yes   | High: from scratch or heavy diffusion FT      | Yes | $\textcolor{red}{\text{No}}$ | $< 3\times$ | Low to near-AR quality |
+| **Jacobi Forcing**   | Causal                 | Yes   | Small: noise-conditioned FT on trajectories | $\textcolor{green}{\text{Yes}}$ |  $\textcolor{green}{\text{Yes}}$   |  $\sim3-4\times$    | near-AR quality   |
+
+
 
 
 ## Citation
