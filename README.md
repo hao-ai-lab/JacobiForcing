@@ -242,6 +242,8 @@ We evaluate baseline models' and Jacobi Forcing models' performance on HumanEval
   <i>*Here we report the strongest checkpoints released by the authors; in principle EAGLE-3 and HASS are lossless in comparison with greedy AR checkpoints if they were trained with the Qwen2.5-7B backbone. Note that SD has a worse acceptance length (TPF) to TPS conversion ratio due to other overheads in the algorithm like token drafting using draft head, tree-like verification overhead, feature merging from different layers etc.</i>
 </p>
 
+#### Performance Summary
+
 Overall, Jacobi Forcing model consistently delivers **up to $3-4\times$ wall-clock speedup** on coding and math tasks with only minor accuracy changes versus greedy AR, while significantly outperforming both dLLMs and prior consistency-based parallel decoders in the accuracy–throughput tradeoff.
 
 
