@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="paper/jacobi_forcing_logo.jpeg" alt="Jacobi Forcing" width="180" align="center">
+  <img src="assets/jacobi_forcing_logo.jpeg" alt="Jacobi Forcing" width="180" align="center">
 </p>
 
 <div align="center"><h1>&nbsp;Jacobi Forcing: Fast and Accurate Causal Parallel Decoding</h1></div>
@@ -31,9 +31,9 @@
 
 <p align="center">
   <picture>
-    <img src="paper/ar_example_demo.gif" width="45%" alt="AR example demo (left)" />
+    <img src="assets/ar_example_demo.gif" width="45%" alt="AR example demo (left)" />
     &nbsp;&nbsp;&nbsp;&nbsp;
-    <img src="paper/jacobi_forcing_example_demo.gif" width="45%" alt="Jacobi Forcing example demo (right)" />
+    <img src="assets/jacobi_forcing_example_demo.gif" width="45%" alt="Jacobi Forcing example demo (right)" />
   </picture>
   <br/>
   <i>Demo of on average more than 4x speedup (181.8 TPS vs. 39.81 TPS) by Jacobi Forcing Model in comparison with the AR baseline (Qwen2.5-Coder-7B-Instruct) on coding sessions.</i>
@@ -62,16 +62,13 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
   - Multiblock decoding and Rejection recycling to exploit higher-quality draft with higher GPU utilization
 
 <p align="center">
-    <img src="paper/trajectory.jpeg" width="90%" alt="higher-quality draft" />
+    <img src="assets/trajectory.jpeg" width="90%" alt="higher-quality draft" />
   <br/>
   <i>fig1: Illustration of higher quality drafts that emerge from Jacobi Forcing model.</i>
 </p>
 
 
-
 ## Installation
-
-
 
 <p align="justify">
   <i>This section is demonstrative with path placeholders: adjust to match your repo structure.</i>
@@ -151,7 +148,7 @@ python3 generate_trajectory/data/2_prepare_efficient_cllm_training_data_progress
 
 <p align="center">
   <picture>
-    <img src="paper/noise_schedule_and_sequence_packing.gif" width="60%" alt="noise schedule mapping" />
+    <img src="assets/noise_schedule_and_sequence_packing.gif" width="60%" alt="noise schedule mapping" />
   </picture>
   <br/>
   <i>fig2: Illustration of the training sequence packing process with an example (linear progressive) noise schedule mapping.</i>
@@ -166,7 +163,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 ```
 
 <p align="center">
-    <img src="paper/noisy_context_attention_mask.jpeg" width="50%" alt="noise context training" />
+    <img src="assets/noisy_context_attention_mask.jpeg" width="50%" alt="noise context training" />
   <br/>
   <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
 </p>
@@ -187,7 +184,7 @@ Jacobi Forcing decoding typically exposes knobs like:
 
 <p align="center">
   <picture>
-    <img src="paper/multiblock_rejection_recycling.gif" width="90%" alt="MR decoding" />
+    <img src="assets/multiblock_rejection_recycling.gif" width="90%" alt="MR decoding" />
   </picture>
   <br/>
   <i>fig4: Illustration of multiblock Jacobi decoding with rejection recycling. High-quality n-grams from earlier iterations are reused as drafts.</i>
@@ -253,6 +250,16 @@ Overall, Jacobi Forcing model consistently delivers **up to $3-4\times$ wall-clo
 
 
 On a single B200 GPU with much higher FLOPs, the same Jacobi Forcing model with multiblock + rejection recycling can achieve an even more significant speedup at around 330 tokens/s (vs. around 80 tokens/s using AR), showing that the design continues to scale on newer accelerators.
+
+
+| Method        | Attention      | Parallelism                      | Training Cost | Single-model Decoding (no draft–verifier)   | Efficient KV Reuse        | Real Speedup | Generation Quality         |
+|----------------------|------------------------|-----------------------------------------------|------------------------------------|-------------------------------------------|----------------------|-------------------------------|---------------------------|
+| **AR**        | Causal | None                          | None                                            | No   |  Yes               |No            | Lossless            |
+| **SD** | Causal                 | Yes             | No to Small: Draft model FT        | $\textcolor{red}{\text{No}}$ | Yes     | $<3.5\times$ | Lossless            | 
+| **dLLMs**            | Non-causal    | Yes   | High: from scratch or heavy diffusion FT      | Yes | $\textcolor{red}{\text{No}}$ | $< 3\times$ | Low to near-AR quality |
+| **Jacobi Forcing**   | Causal                 | Yes   | Small: noise-conditioned FT on trajectories | $\textcolor{green}{\text{Yes}}$ |  $\textcolor{green}{\text{Yes}}$   |  $\sim3-4\times$    | near-AR quality   |
+
+
 
 
 ## Citation
