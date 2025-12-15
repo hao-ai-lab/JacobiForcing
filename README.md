@@ -115,24 +115,28 @@ pip install -r requirements.txt
 
 Jacobi Forcing training involves the following steps:
 
-1. Prepare training data.
+#### Prepare training data
 
-  - Choice A: download existing data from Huggingface.
+##### Choice A: download existing data from Huggingface.
 
 ```
 git lfs clone https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_training_data_n32w16
 ```
 
-  - Choice B, step 1: Collect Jacobi trajectories from a base AR model (intermediate states + fixed-point state for all $n-$token blocks).
+##### Choice B
+
+- step 1: Collect Jacobi trajectories from a base AR model (intermediate states + fixed-point state for all $n-$token blocks).
 
 ```
-# Choice 1, generate trajctories using customized models
-# first modify `generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh` to customize model path, trajectory data destimation, and input data path (you can download our length-bucketed input data from [this link for code](https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_length_sorted) and [this link for math](https://huggingface.co/datasets/JacobiForcing/OpenThought2_length_bucketed))
-# Adapt from the script `generate_trajectory/generation/qwen2_modeling_jacobi_forcing_greedy.py` if the model used is not Qwen2.5 
+# generate trajctories using customized models
 bash generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh
 ```
 
-  - Choice B, step 2: training sequence packing and mapping noise schedule to training sequence.
+If the target model is not Qwen2.5, first modify `generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh` to customize model path, trajectory data destimation, and input data path (you can download our length-bucketed input data from [this link for code](https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_length_sorted) and [this link for math](https://huggingface.co/datasets/JacobiForcing/OpenThought2_length_bucketed)).
+
+Then adapt from the script `generate_trajectory/generation/qwen2_modeling_jacobi_forcing_greedy.py` to make your target model compatible.
+
+- step 2: training sequence packing and mapping noise schedule to training sequence.
 
 ```
 python3 generate_trajectory/generation/2_prepare_efficient_cllm_training_data_progressive_noise_window.py \
@@ -154,7 +158,7 @@ python3 generate_trajectory/generation/2_prepare_efficient_cllm_training_data_pr
 </p>
 
 
-2. Noise-conditioned training over long horizons.
+#### Noise-conditioned training over long horizons
 
 ```
 cd /home/lah003/workspace/CLLM2/JacobiForcing
@@ -166,6 +170,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
   <br/>
   <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
 </p>
+
 
 
 ### Inference
