@@ -30,7 +30,7 @@ from pathlib import Path
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from cllm2_qwen2_modeling_new_cache32 import get_diffusion_decoding_trajectory
+from qwen2_modeling_jacobi_forcing_nongreedy_blk32 import get_diffusion_decoding_trajectory
 
 Qwen2ForCausalLM.get_diffusion_decoding_trajectory = get_diffusion_decoding_trajectory
 

@@ -1,4 +1,4 @@
-from transformers import Qwen2ForCausalLM, AutoTokenizer
+from transformers import Qwen2ForCausalLM, Qwen3ForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from einops import rearrange
 from torch import nn
@@ -19,35 +19,32 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved_continuous_drafting import jacobi_forward_greedy
-Qwen2ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
+from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved import jacobi_forward_greedy
+#Qwen2ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
+Qwen3ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
 
-# Load dataset
-df = pd.read_parquet("/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
+# ---------------------------
+# Load dataset (first 100)
+# ---------------------------
+import pandas as pd
+
+df = pd.read_json("/home/lah003/data/MATH-500/test.jsonl", lines=True)
 df_size = len(df)
-print(f"Loaded HumanEval dataset with {df_size} samples")
+print(f"Loaded MATH500 dataset with {df_size} samples")
 records = df.to_dict(orient="records")
 
 # ---------------------------
 # Load model/tokenizer once
 # ---------------------------
-#model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
-#model_name = "/home/lah003/models/yc-blk32-10k"
-#model_name = "/home/lah003/models/0911_blcksz32_w32_steps58k"
-#model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
-#model_name = "/home/lah003/models/0915_w16_blk32_from_scratch_55k"
-
-#model_name = "/home/lah003/models/progressive_noise_cllm2_mask_1m_steps"
-#model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
-model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n16-distill-n32w16-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-212000"
-
-model = Qwen2ForCausalLM.from_pretrained(
+model_name = "/home/lah003/models/1022-lx-math-4b-math-n16w16"
+model = Qwen3ForCausalLM.from_pretrained(
     model_name,
     device_map="cuda",
     torch_dtype=torch.bfloat16,
     attn_implementation="flash_attention_2"
 )
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct")
+
+tokenizer = AutoTokenizer.from_pretrained("/home/lah003/models/Qwen3-4B-Instruct-2507")
 model.eval()
 
 
@@ -57,10 +54,10 @@ alt_eos_id = 151645  # keep your special EOS as a fallback
 # ---------------------------
 # Generation/profiling config
 # ---------------------------
-n_token_seq_len = 64
+n_token_seq_len = 128
 
 # Safety caps so a sample can't run forever.
-max_new_tokens = 1024     # hard cap on total new tokens per prompt
+max_new_tokens = 512     # hard cap on total new tokens per prompt
 max_calls = 1024          # hard cap on number of diffusion_decoding calls per prompt
 
 # ---------------------------
@@ -72,23 +69,20 @@ all_generations = []
 
 total_gen_only_time = 0
 
-for idx, row in tqdm(enumerate(records)):
+for idx, row in tqdm(enumerate(records[:10])):
     task_id = row.get("task_id", f"idx_{idx}")
-    #prompt = "You are given a partially completed Python function with the header and the doc string. Complete the following function according to given information:\n\n" + row["prompt"]
-    prompt = """
-Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
-```python
-{}
-```
-""".strip().format(
-            row["prompt"].strip()
-        )
-    #prompt = "Respond only in code.\n" + row["prompt"]
-
-    messages = [{"role": "user", "content": prompt}]
+    # prompt = """Problem: {}\nMark your solution with \\boxed\nAnswer:""".strip().format(
+    #         row["problem"].strip()
+    #     )
+    prompt = row["problem"]
+    # messages = [{"role": "user", "content": prompt}]
+    messages = [
+                    {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+                    {"role": "user", "content": prompt}
+                ]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
+    
     input_ids = model_inputs["input_ids"]
     attention_mask = torch.full_like(input_ids, 1, device=model.device)
 
@@ -231,58 +225,14 @@ Please continue to complete the function. You are not allowed to modify the give
     if (idx + 1) % 5 == 0 or (idx + 1) == len(records):
         print(f"====[{idx+1}/{len(records)}] task_id={task_id} new_toks={total_new_tokens} "
               f"calls={calls} avg_iter/call={avg_iter_per_call:.2f} reason={stop_reason}====")
-        
-#### ADDED Lines ####
-import json
-import re
-
-# Function to load the data from JSONL
-def load_jsonl(file_path):
-    with open(file_path, 'r') as f:
-        return [json.loads(line.strip()) for line in f]
-
-# Function to save the data to JSONL
-def save_jsonl(data, save_path):
-    with open(save_path, 'w') as f:
-        for item in data:
-            f.write(json.dumps(item) + '\n')
-
-# Function to extract Python code block from a string
-def extract_python_code(text):
-    match = re.search(r'```python([\s\S]*?)```', text)  # Regex to match the block
-    if match:
-        return match.group(1).strip()  # Return the code inside the block
-    else:
-        return text  # Return orginal one if no match is found
-
-eval_dir = "/home/lah003/data/CLLM2_eval_generations/baselines"
-os.makedirs(eval_dir, exist_ok=True)
-
-original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
-original_generations = load_jsonl(original_path)
-
-# Process each generation and update with processed generation
-for i, original_generation in enumerate(original_generations):
-    # Assuming `all_generations[i]` exists and has an 'extracted' key or method
-    original_generation['output'] = all_generations[i]
-    processed_generation = extract_python_code(all_generations[i])  # Apply the extract method
-    print(f'Task id: {i}, Extracted answer: {processed_generation}')
-    original_generation['generation'] = processed_generation
-
-# Save processed generations
-save_path = os.path.join(eval_dir, f'oct_n16w16_distilln32w16_212kstps_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
-save_jsonl(original_generations, save_path)
-
-print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")
 
 #### ADDED Lines ####
-
 # ---------------------------
 # Aggregate + save
 # ---------------------------
 t_overall = time.perf_counter() - t0_overall
 df_profile = pd.DataFrame(all_rows)
-csv_path = "diffusion_profile_humaneval.csv"
+csv_path = "diffusion_profile_math500.csv"
 df_profile.to_csv(csv_path, index=False)
 
 # Print quick summary (EOS-only)
@@ -307,4 +257,4 @@ print("\nStop reasons (all examples):")
 print(df_profile['stop_reason'].value_counts())
 
 # Optional: save EOS-only rows too
-df_eos.to_csv("diffusion_profile_greedy_humaneval_eos.csv", index=False)
+df_eos.to_csv("diffusion_profile_greedy_math500_eos.csv", index=False)

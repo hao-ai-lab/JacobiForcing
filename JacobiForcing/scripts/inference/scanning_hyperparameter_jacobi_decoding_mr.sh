@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROFILE_PY="scanning_random_init_kv_opencode_acc_humaneval_evalchemy_output_greedy_improved_multiblock_lookahead_unified.py"
+PROFILE_PY="jacobi_forcing_inference_MR_humaneval_config_grid_search.py"
 
 DF_FILE="/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet"
 MODEL_NAME="/raid/lah003/shiftedattn-10-16-7b-qwen2p5-coder-n32w16-n16distill-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-344092"

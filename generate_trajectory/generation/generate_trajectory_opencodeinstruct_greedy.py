@@ -30,7 +30,7 @@ from pathlib import Path
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from cllm2_qwen2_modeling_kv_terminate_on_eos import get_jacobi_forward_trajectory_greedy
+from qwen2_modeling_jacobi_forcing_greedy import get_jacobi_forward_trajectory_greedy
 
 Qwen2ForCausalLM.get_jacobi_forward_trajectory_greedy = get_jacobi_forward_trajectory_greedy
 

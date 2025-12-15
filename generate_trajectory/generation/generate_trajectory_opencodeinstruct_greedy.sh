@@ -28,7 +28,7 @@ for i in "${!json_files[@]}"; do
     # Each GPU gets one file
     echo "Launching process on CUDA:${cuda_device} for file ${filename}"
 
-    CUDA_VISIBLE_DEVICES=${cuda_device} python3 generate_trajectory/v2/generate_trajectory_kv_greedy_opencodeinstruct.py \
+    CUDA_VISIBLE_DEVICES=${cuda_device} python3 generate_trajectory/v2/generate_trajectory_opencodeinstruct_greedy.py \
         --filename "${filename}" \
         --model "${model_path}" \
         --n_token_seq_len "${n_token_seq_len}" \

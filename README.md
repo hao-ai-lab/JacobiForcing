@@ -2,7 +2,7 @@
   <img src="paper/jacobi_forcing_logo.jpeg" alt="Jacobi Forcing" width="180" align="center">
 </p>
 
-<div align="center"><h1>&nbsp;Jacobi Forcing: Fast and Accurate Native Parallel Decoders</h1></div>
+<div align="center"><h1>&nbsp;Jacobi Forcing: Fast and Accurate Causal Parallel Decoding</h1></div>
 
 <!-- =========================
      Badges + Links
@@ -25,12 +25,9 @@
 
 ##
 
-*Jacobi Forcing* is a training technique that converts standard autoregressive (AR) LLMs into **native causal parallel decoders**.
+*Jacobi Forcing* is a new training technique that converts LLMs into native casual parallel decoders. Jacobi forcing keeps the casual AR backbone and fixes the AR-to-diffusion mismatch by training the model to handle noisy future blocks along its own Jacobi decoding trajectories. 
 
-It enables fast (causal) parallel decoding while keeping the AR backbone and KV cache resue unchanged so it can often be deployed as a near drop-in replacement for existing AR checkpoints.
-</p>
-
-In the accompanying blog, we show **up to &sim;4&times; wall-clock speedup** on coding and math tasks with near-AR quality, by decoding multiple tokens per forward pass and leveraging higher-quality n-grams obtained from Jacobi Forcing training.
+*Jacobi Forcing* yields an AR model which behaves like a diffusion-style decoder—decoding multiple tokens per pass, but still from left to right—with up to $4.5\times$ higher tokens-per-forward and $4\times$ wall-clock speedup on coding and math tasks, while retraining near-AR generation quality. 
 
 <p align="center">
   <picture>
@@ -61,15 +58,15 @@ AR decoding is high-quality but serial: one forward pass per token. Diffusion la
 
 Jacobi Forcing bridges this gap by training an AR model to behave like a diffusion-style decoder while staying causal:
   - **Causal, left-to-right generation** with KV-cache reuse
-  - Parallel token updates via Jacobi-iteration refinements
+  - Parallel token updates within a block of size $n$ (via Jacobi decoding) and training makes such convergence faster
   - Multiblock decoding and Rejection recycling to exploit higher-quality draft with higher GPU utilization
 
 <p align="center">
   <picture>
-    <img src="paper/multiblock_rejection_recycling.gif" width="90%" alt="Multiblock + rejection recycling" />
+    <img src="paper/trajectory.png" width="90%" alt="higher-quality draft" />
   </picture>
   <br/>
-  <i>fig2: Illustration of multiblock Jacobi decoding with rejection recycling.</i>
+  <i>fig1: Illustration of higher quality drafts that emerge from Jacobi Forcing model.</i>
 </p>
 
 
@@ -120,17 +117,56 @@ pip install -r requirements.txt
 
 Jacobi Forcing training involves the following steps:
 
-1. Collect Jacobi trajectories from a base AR model (intermediate drafts + fixed points).
+1. Prepare training data.
+
+  - Choice A: download existing data from Huggingface.
+
+```
+git lfs clone https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_training_data_n32w16
+```
+
+  - Choice B, step 1: Collect Jacobi trajectories from a base AR model (intermediate states + fixed-point state for all $n-$token blocks).
+
+```
+# Choice 1, generate trajctories using customized models
+# first modify `generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh` to customize model path, trajectory data destimation, and input data path (you can download our length-bucketed input data from [this link for code](https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_length_sorted) and [this link for math](https://huggingface.co/datasets/JacobiForcing/OpenThought2_length_bucketed))
+# Adapt from the script `generate_trajectory/generation/qwen2_modeling_jacobi_forcing_greedy.py` if the model used is not Qwen2.5 
+bash generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh
+```
+
+  - Choice B, step 2: training sequence packing and mapping noise schedule to training sequence.
+
+```
+python3 generate_trajectory/generation/2_prepare_efficient_cllm_training_data_progressive_noise_window.py \
+    --input_path {trajectory_data_path} \
+    --output_path {output_training_seq_path} \
+    --n_token_seq_length {block_size} \
+    --window_size {window_size} \
+    --min_noisy_ratio 0 \
+    --max_noisy_ratio 1.0 \
+    --strategy "progressive"
+```
+
+<p align="center">
+  <picture>
+    <img src="paper/noise_schedule_and_sequence_packing.gif" width="90%" alt="noise schedule mapping" />
+  </picture>
+  <br/>
+  <i>fig2: Illustration of the training sequence packing process with an example (linear progressive) noise schedule mapping.</i>
+</p>
 
 
-2. Noise-conditioned training over long horizons to make drafts stable under Jacobi refinement.
+2. Noise-conditioned training over long horizons.
 
-
-3. Mix with a small AR loss to anchor generation quality.
-
+```
+cd /home/lah003/workspace/CLLM2/JacobiForcing
+bash scripts/train/train_jacobi_forcing_coder_n32.sh
+```
 
 
 ### Inference
+
+#### Multiblock De
 
 Jacobi Forcing decoding typically exposes knobs like:
 
@@ -142,14 +178,62 @@ Jacobi Forcing decoding typically exposes knobs like:
 
 - activation ratio `r`
 
-Recommended starting point:
+<p align="center">
+  <picture>
+    <img src="paper/multiblock_rejection_recycling.gif" width="90%" alt="MR decoding" />
+  </picture>
+  <br/>
+  <i>fig3: Illustration of multiblock Jacobi decoding with rejection recycling. High-quality n-grams from earlier iterations are reused as drafts.</i>
+</p>
+
+Recommended starting point (from our grid search):
 
 `n=64, K=2, pool_size=4, r=0.85`
+
+To run comprehensive grid search profiling for TPS speedup and TPF across different settings, run:
+
+```
+bash scripts/inference/scanning_hyperparameter_jacobi_decoding_mr.sh
+```
+
+To run a specific decoding setting with multiblock decoding and rejection recycling, run:
+```
+# vanilla Jacobi decoding
+python3 JacobiForcing/jacobi_forcing_inference_humaneval.py
+
+# with multiblock decoding and rejection recycling
+python3 JacobiForcing/jacobi_forcing_inference_MR_humaneval.py
+```
 
 
 ### Evaluation
 
+#### Generation Quality Evaluation
 We evaluate baseline models' and Jacobi Forcing models' performance on HumanEval, MBPP, GSM8K and MATH following the settings in [evalchemy](https://github.com/mlfoundations/evalchemy).
+
+
+#### Performance Comparison
+
+| Task      | Method           | Family      | Speedup $\uparrow$ | TPF $\uparrow$ | TPS $\uparrow$ | Acc / Solve $\uparrow$ |
+|----------|--------------|------------|-----------|-------|-------|---------------|
+| HumanEval| AR           | AR           | $1.00\times$    | 1.0  | 41.3  | 87.8%       |
+|          | D2F          | dLLM         | $1.8\times$    |  2.5   | 73.2    | 54.3%   |
+|          | Fast-dLLM    | dLLM         | $1.5\times$    |  1.8   | 60.0    | 53.0%   |
+|          | dParallel    | dLLM-distilled  | $2.1\times$  |  2.9   | 88.5    | 54.3%   |
+|          | EAGLE-3      | SD           |  $2.9\times$ | 6.4 | 120.7 | 68.9%$^*$ |
+|          | HASS         | SD           |  $3.4\times$ | 5.5 | 138.7 | 61.6%$^*$ |
+|          | CLLM$^*$        | causal parallel | $2.5\times$  | 2.7  | 103.3 | 88.0%       |
+|          | **Jacobi Forcing model**    | causal parallel | $3.9\times$    | 4.0  | 159.5 | 83.5%  |
+|          | **Jacobi Forcing model (MR)** | causal parallel | **$4.0\times$** | 4.1  | 163.9 | 83.5% |
+| GSM8K | AR               | AR           | $1.0\times$     | 1.0  | 41.8   | 92.4%      |
+|       | D2F                | dLLM       | $2.2\times$   |  2.3  |  91.2   | 77.6%    |
+|       | Fast-dLLM      | dLLM           | $1.2\times$       |  2.1 | 49.8   | 75.0%      |
+|       | dParallel      | dLLM-distilled | $3.1\times$  |  3.8   |  128.0   | 82.9%   |
+|       | EAGLE-3        | SD             | $3.3\times$  | 7.2   | 138.6  |  63.9%$^*$           |
+|       | HASS           | SD             | $3.1\times$  | 5.0   | 128.1  |  74.0%$^*$           |
+|       | CLLM*          | causal parallel    | $2.1\times$     | 2.3  | 86.8   | 92.2%      |
+|       | **Jacobi Forcing model**        | causal parallel | $3.5\times$    | 3.7  | 146.1  | 91.4% |
+|       | **Jacobi Forcing model (MR)**   |causal parallel | **$3.7\times$** | 4.0  | 154.9 | 91.4% |
 
 ## Citation
 
