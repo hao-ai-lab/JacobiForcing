@@ -25,15 +25,12 @@
 
 ##
 
-<p align="justify">
-  <b>Jacobi Forcing</b> is a training technique that converts standard autoregressive (AR) LLMs into <b>native causal parallel decoders</b>.
-  
-  It enables <b>fast multiblock parallel decoding</b> (Jacobi-style refinement, left-to-right) while keeping the <b>AR backbone + KV layout</b>—so it can often be deployed as a near drop-in replacement for existing AR checkpoints.
+*Jacobi Forcing* is a training technique that converts standard autoregressive (AR) LLMs into **native causal parallel decoders**.
+
+It enables fast (causal) parallel decoding while keeping the AR backbone and KV cache resue unchanged so it can often be deployed as a near drop-in replacement for existing AR checkpoints.
 </p>
 
-<p align="justify">
-  In the accompanying blog, we show <b>up to &sim;4&times; wall-clock speedup</b> on coding and math tasks with <b>near-AR quality</b>, by decoding <b>multiple tokens per forward pass</b> and leveraging <b>multiblock decoding + rejection recycling</b>.
-</p>
+In the accompanying blog, we show **up to &sim;4&times; wall-clock speedup** on coding and math tasks with near-AR quality, by decoding multiple tokens per forward pass and leveraging higher-quality n-grams obtained from Jacobi Forcing training.
 
 <p align="center">
   <picture>
@@ -60,14 +57,12 @@
 
 ### Why faster decoding?
 
-<p align="justify">
-  AR decoding is high-quality but serial: one forward pass per token. Diffusion language models can decode many tokens in parallel, but typically require **non-causal objectives** and often **break KV-cache-friendly serving**.
+AR decoding is high-quality but serial: one forward pass per token. Diffusion language models can decode many tokens in parallel, but typically require **non-causal objectives** and often **break KV-cache-friendly serving**.
 
 Jacobi Forcing bridges this gap by training an AR model to behave like a diffusion-style decoder while staying causal:
   - **Causal, left-to-right generation** with KV-cache reuse
   - Parallel token updates via Jacobi-iteration refinements
   - Multiblock decoding and Rejection recycling to exploit higher-quality draft with higher GPU utilization
-</p>
 
 <p align="center">
   <picture>
