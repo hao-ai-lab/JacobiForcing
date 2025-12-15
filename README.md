@@ -62,7 +62,7 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
   - Multiblock decoding and Rejection recycling to exploit higher-quality draft with higher GPU utilization
 
 <p align="center">
-    <img src="paper/trajectory.png" width="90%" alt="higher-quality draft" />
+    <img src="paper/trajectory.jpeg" width="90%" alt="higher-quality draft" />
   <br/>
   <i>fig1: Illustration of higher quality drafts that emerge from Jacobi Forcing model.</i>
 </p>
@@ -166,7 +166,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 ```
 
 <p align="center">
-    <img src="paper/noisy_context_attention_mask.png" width="90%" alt="noise context training" />
+    <img src="paper/noisy_context_attention_mask.jpeg" width="50%" alt="noise context training" />
   <br/>
   <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
 </p>
