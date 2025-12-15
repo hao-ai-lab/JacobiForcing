@@ -163,6 +163,14 @@ cd /home/lah003/workspace/CLLM2/JacobiForcing
 bash scripts/train/train_jacobi_forcing_coder_n32.sh
 ```
 
+<p align="center">
+  <picture>
+    <img src="paper/noisy_context_attention_mask.png" width="90%" alt="noise context training" />
+  </picture>
+  <br/>
+  <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
+</p>
+
 
 ### Inference
 
@@ -183,7 +191,7 @@ Jacobi Forcing decoding typically exposes knobs like:
     <img src="paper/multiblock_rejection_recycling.gif" width="90%" alt="MR decoding" />
   </picture>
   <br/>
-  <i>fig3: Illustration of multiblock Jacobi decoding with rejection recycling. High-quality n-grams from earlier iterations are reused as drafts.</i>
+  <i>fig4: Illustration of multiblock Jacobi decoding with rejection recycling. High-quality n-grams from earlier iterations are reused as drafts.</i>
 </p>
 
 Recommended starting point (from our grid search):
@@ -214,26 +222,28 @@ We evaluate baseline models' and Jacobi Forcing models' performance on HumanEval
 
 #### Performance Comparison
 
-| Task      | Method           | Family      | Speedup $\uparrow$ | TPF $\uparrow$ | TPS $\uparrow$ | Acc / Solve $\uparrow$ |
+| Task      | Method           | Family      | Speedup | TPF | TPS | Acc / Solve $\uparrow$ |
 |----------|--------------|------------|-----------|-------|-------|---------------|
 | HumanEval| AR           | AR           | $1.00\times$    | 1.0  | 41.3  | 87.8%       |
 |          | D2F          | dLLM         | $1.8\times$    |  2.5   | 73.2    | 54.3%   |
 |          | Fast-dLLM    | dLLM         | $1.5\times$    |  1.8   | 60.0    | 53.0%   |
 |          | dParallel    | dLLM-distilled  | $2.1\times$  |  2.9   | 88.5    | 54.3%   |
-|          | EAGLE-3      | SD           |  $2.9\times$ | 6.4 | 120.7 | 68.9%$^*$ |
-|          | HASS         | SD           |  $3.4\times$ | 5.5 | 138.7 | 61.6%$^*$ |
-|          | CLLM$^*$        | causal parallel | $2.5\times$  | 2.7  | 103.3 | 88.0%       |
+|          | EAGLE-3      | SD           |  $2.9\times$ | 6.4 | 120.7 | 68.9%* |
+|          | HASS         | SD           |  $3.4\times$ | 5.5 | 138.7 | 61.6%* |
+|          | CLLM*        | causal parallel | $2.5\times$  | 2.7  | 103.3 | 88.0%       |
 |          | **Jacobi Forcing model**    | causal parallel | $3.9\times$    | 4.0  | 159.5 | 83.5%  |
 |          | **Jacobi Forcing model (MR)** | causal parallel | **$4.0\times$** | 4.1  | 163.9 | 83.5% |
 | GSM8K | AR               | AR           | $1.0\times$     | 1.0  | 41.8   | 92.4%      |
 |       | D2F                | dLLM       | $2.2\times$   |  2.3  |  91.2   | 77.6%    |
 |       | Fast-dLLM      | dLLM           | $1.2\times$       |  2.1 | 49.8   | 75.0%      |
 |       | dParallel      | dLLM-distilled | $3.1\times$  |  3.8   |  128.0   | 82.9%   |
-|       | EAGLE-3        | SD             | $3.3\times$  | 7.2   | 138.6  |  63.9%$^*$           |
-|       | HASS           | SD             | $3.1\times$  | 5.0   | 128.1  |  74.0%$^*$           |
+|       | EAGLE-3        | SD             | $3.3\times$  | 7.2   | 138.6  |  63.9%*           |
+|       | HASS           | SD             | $3.1\times$  | 5.0   | 128.1  |  74.0%*           |
 |       | CLLM*          | causal parallel    | $2.1\times$     | 2.3  | 86.8   | 92.2%      |
 |       | **Jacobi Forcing model**        | causal parallel | $3.5\times$    | 3.7  | 146.1  | 91.4% |
 |       | **Jacobi Forcing model (MR)**   |causal parallel | **$3.7\times$** | 4.0  | 154.9 | 91.4% |
+
+<small><em>Footnote<sup>*</sup>:</em> Here we report the strongest checkpoints released by the authors; in principle EAGLE-3 and HASS are lossless in comparison with greedy AR checkpoints if they were trained with the Qwen2.5-7B backbone. Note that SD has a worse acceptance length (TPF) to TPS conversion ratio due to other overheads in the algorithm like token drafting using draft head, tree-like verification overhead, feature merging from different layers etc. </small>
 
 ## Citation
 
