@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="paper/baselines_comparison.png" alt="Jacobi Forcing" width="220" align="center">
+  <img src="paper/jacobi_forcing_logo.jpeg" alt="Jacobi Forcing" width="220" align="center">
 </p>
 
 <div align="center"><h1>&nbsp;Fast and Accurate Causal Parallel Decoding using Jacobi Forcing</h1></div>
