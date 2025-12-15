@@ -36,7 +36,7 @@
     <img src="paper/jacobi_forcing_example_demo.gif" width="45%" alt="Jacobi Forcing example demo (right)" />
   </picture>
   <br/>
-  <i>fig1: Demo of on average more than 4x speedup (181.8 TPS vs. 39.81 TPS) by Jacobi Forcing Model in comparison with the AR baseline (Qwen2.5-Coder-7B-Instruct) on coding sessions.</i>
+  <i>Demo of on average more than 4x speedup (181.8 TPS vs. 39.81 TPS) by Jacobi Forcing Model in comparison with the AR baseline (Qwen2.5-Coder-7B-Instruct) on coding sessions.</i>
 </p>
 
 
@@ -151,7 +151,7 @@ python3 generate_trajectory/generation/2_prepare_efficient_cllm_training_data_pr
 
 <p align="center">
   <picture>
-    <img src="paper/noise_schedule_and_sequence_packing.gif" width="90%" alt="noise schedule mapping" />
+    <img src="paper/noise_schedule_and_sequence_packing.gif" width="60%" alt="noise schedule mapping" />
   </picture>
   <br/>
   <i>fig2: Illustration of the training sequence packing process with an example (linear progressive) noise schedule mapping.</i>
@@ -164,13 +164,6 @@ python3 generate_trajectory/generation/2_prepare_efficient_cllm_training_data_pr
 cd /home/lah003/workspace/CLLM2/JacobiForcing
 bash scripts/train/train_jacobi_forcing_coder_n32.sh
 ```
-
-<p align="center">
-    <img src="paper/noisy_context_attention_mask.jpeg" width="50%" alt="noise context training" />
-  <br/>
-  <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
-</p>
-
 
 
 ### Inference
@@ -245,7 +238,15 @@ We evaluate baseline models' and Jacobi Forcing models' performance on HumanEval
 |       | **Jacobi Forcing model**        | causal parallel | $3.5\times$    | 3.7  | 146.1  | 91.4% |
 |       | **Jacobi Forcing model (MR)**   |causal parallel | **$3.7\times$** | 4.0  | 154.9 | 91.4% |
 
-<small><em>Footnote<sup>*</sup>:</em> Here we report the strongest checkpoints released by the authors; in principle EAGLE-3 and HASS are lossless in comparison with greedy AR checkpoints if they were trained with the Qwen2.5-7B backbone. Note that SD has a worse acceptance length (TPF) to TPS conversion ratio due to other overheads in the algorithm like token drafting using draft head, tree-like verification overhead, feature merging from different layers etc. </small>
+<p align="justify">
+  <i>*Here we report the strongest checkpoints released by the authors; in principle EAGLE-3 and HASS are lossless in comparison with greedy AR checkpoints if they were trained with the Qwen2.5-7B backbone. Note that SD has a worse acceptance length (TPF) to TPS conversion ratio due to other overheads in the algorithm like token drafting using draft head, tree-like verification overhead, feature merging from different layers etc.</i>
+</p>
+
+Overall, Jacobi Forcing model consistently delivers **up to $3-4\times$ wall-clock speedup** on coding and math tasks with only minor accuracy changes versus greedy AR, while significantly outperforming both dLLMs and prior consistency-based parallel decoders in the accuracy–throughput tradeoff.
+
+
+On a single B200 GPU with much higher FLOPs, the same Jacobi Forcing model with multiblock + rejection recycling can achieve an even more significant speedup at around 330 tokens/s (vs. around 80 tokens/s using AR), showing that the design continues to scale on newer accelerators.
+
 
 ## Citation
 
