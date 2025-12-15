@@ -62,9 +62,7 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
   - Multiblock decoding and Rejection recycling to exploit higher-quality draft with higher GPU utilization
 
 <p align="center">
-  <picture>
     <img src="paper/trajectory.png" width="90%" alt="higher-quality draft" />
-  </picture>
   <br/>
   <i>fig1: Illustration of higher quality drafts that emerge from Jacobi Forcing model.</i>
 </p>
@@ -164,9 +162,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 ```
 
 <p align="center">
-  <picture>
     <img src="paper/noisy_context_attention_mask.png" width="90%" alt="noise context training" />
-  </picture>
   <br/>
   <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
 </p>
@@ -174,7 +170,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 
 ### Inference
 
-#### Multiblock De
+#### Multiblock Decoding
 
 Jacobi Forcing decoding typically exposes knobs like:
 
@@ -201,6 +197,7 @@ Recommended starting point (from our grid search):
 To run comprehensive grid search profiling for TPS speedup and TPF across different settings, run:
 
 ```
+cd JacobiForcing
 bash scripts/inference/scanning_hyperparameter_jacobi_decoding_mr.sh
 ```
 
