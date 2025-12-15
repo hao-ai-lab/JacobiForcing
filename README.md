@@ -61,19 +61,12 @@
 ### Why faster decoding?
 
 <p align="justify">
-  AR decoding is high-quality but serial: one forward pass per token. Diffusion language models can decode many tokens in parallel,<br/>
-  but typically require <b>non-causal objectives</b> and often <b>break KV-cache-friendly serving</b>.
-</p>
+  AR decoding is high-quality but serial: one forward pass per token. Diffusion language models can decode many tokens in parallel, but typically require **non-causal objectives** and often **break KV-cache-friendly serving**.
 
-<p align="justify">
-  <b>Jacobi Forcing</b> bridges this gap by training an AR model to behave like a diffusion-style decoder <b>while staying causal</b>:
-</p>
-
-<p align="justify">
-  - <b>Causal, left-to-right</b> generation with <b>KV-cache reuse</b><br/>
-  - <b>Parallel token updates</b> via <b>Jacobi-style refinement</b><br/>
-  - <b>Multiblock decoding</b> for higher GPU utilization<br/>
-  - <b>Rejection recycling</b> to avoid wasting stable n-grams
+Jacobi Forcing bridges this gap by training an AR model to behave like a diffusion-style decoder while staying causal:
+  - **Causal, left-to-right generation** with KV-cache reuse
+  - Parallel token updates via Jacobi-iteration refinements
+  - Multiblock decoding and Rejection recycling to exploit higher-quality draft with higher GPU utilization
 </p>
 
 <p align="center">
