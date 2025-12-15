@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="paper/jacobi_forcing_logo.jpeg" alt="Jacobi Forcing" width="180" align="center">
+  <img src="assets/jacobi_forcing_logo.jpeg" alt="Jacobi Forcing" width="180" align="center">
 </p>
 
 <div align="center"><h1>&nbsp;Jacobi Forcing: Fast and Accurate Causal Parallel Decoding</h1></div>
@@ -9,7 +9,7 @@
      ========================= -->
 <p align="center">
   <a href="http://arxiv.org/abs/XXXX.XXXXX">
-    <img src="https://flat.badgen.net/badge/Paper/arXiv/red" alt="Paper">
+    <img src="https://flat.badgen.net/badge/assets/arXiv/red" alt="Paper">
   </a>
   <a href="https://hao-ai-lab.github.io/blogs/jacobi-forcing/">
     <img src="https://flat.badgen.net/badge/Blog/Jacobi%20Forcing/blue" alt="Blog">
@@ -31,9 +31,9 @@
 
 <p align="center">
   <picture>
-    <img src="paper/ar_example_demo.gif" width="45%" alt="AR example demo (left)" />
+    <img src="assets/ar_example_demo.gif" width="45%" alt="AR example demo (left)" />
     &nbsp;&nbsp;&nbsp;&nbsp;
-    <img src="paper/jacobi_forcing_example_demo.gif" width="45%" alt="Jacobi Forcing example demo (right)" />
+    <img src="assets/jacobi_forcing_example_demo.gif" width="45%" alt="Jacobi Forcing example demo (right)" />
   </picture>
   <br/>
   <i>Demo of on average more than 4x speedup (181.8 TPS vs. 39.81 TPS) by Jacobi Forcing Model in comparison with the AR baseline (Qwen2.5-Coder-7B-Instruct) on coding sessions.</i>
@@ -62,7 +62,7 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
   - Multiblock decoding and Rejection recycling to exploit higher-quality draft with higher GPU utilization
 
 <p align="center">
-    <img src="paper/trajectory.jpeg" width="90%" alt="higher-quality draft" />
+    <img src="assets/trajectory.jpeg" width="90%" alt="higher-quality draft" />
   <br/>
   <i>fig1: Illustration of higher quality drafts that emerge from Jacobi Forcing model.</i>
 </p>
@@ -159,7 +159,7 @@ python3 generate_trajectory/data/2_prepare_efficient_cllm_training_data_progress
 
 <p align="center">
   <picture>
-    <img src="paper/noise_schedule_and_sequence_packing.gif" width="60%" alt="noise schedule mapping" />
+    <img src="assets/noise_schedule_and_sequence_packing.gif" width="60%" alt="noise schedule mapping" />
   </picture>
   <br/>
   <i>fig2: Illustration of the training sequence packing process with an example (linear progressive) noise schedule mapping.</i>
@@ -174,7 +174,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 ```
 
 <p align="center">
-    <img src="paper/noisy_context_attention_mask.jpeg" width="50%" alt="noise context training" />
+    <img src="assets/noisy_context_attention_mask.jpeg" width="50%" alt="noise context training" />
   <br/>
   <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
 </p>
@@ -195,7 +195,7 @@ Jacobi Forcing decoding typically exposes knobs like:
 
 <p align="center">
   <picture>
-    <img src="paper/multiblock_rejection_recycling.gif" width="90%" alt="MR decoding" />
+    <img src="assets/multiblock_rejection_recycling.gif" width="90%" alt="MR decoding" />
   </picture>
   <br/>
   <i>fig4: Illustration of multiblock Jacobi decoding with rejection recycling. High-quality n-grams from earlier iterations are reused as drafts.</i>
