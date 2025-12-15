@@ -14,7 +14,7 @@
   <a href="https://hao-ai-lab.github.io/blogs/jacobi-forcing/">
     <img src="https://flat.badgen.net/badge/Blog/Jacobi%20Forcing/blue" alt="Blog">
   </a>
-  <a href="http://huggingface.co/JacobiForcing/xxx">
+  <a href="http://huggingface.co/JacobiForcing">
     <img src="https://flat.badgen.net/badge/Weights/HuggingFace/yellow" alt="Weights">
   </a>
   <a href="https://opensource.org/licenses/Apache-2.0">
