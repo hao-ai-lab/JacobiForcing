@@ -68,13 +68,7 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
 </p>
 
 
-<<<<<<< HEAD
-=======
-
->>>>>>> main
 ## Installation
-
-
 
 <p align="justify">
   <i>This section is demonstrative with path placeholders: adjust to match your repo structure.</i>
