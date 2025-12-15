@@ -180,7 +180,7 @@ st.title("Jacobi Forcing Model Chatbot Demo")
 
 st.markdown(
     """
-The model is beta and fine-tuned on code-only dataset. For optimal speedup please test coding tasks.\n
+The model is beta and fine-tuned on coding dataset. For optimal speedup please test coding tasks.\n
 
 Uncheck `Jacobi decoding (MR)` on the left panel to test the AR baseline.\n
 
