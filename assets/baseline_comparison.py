@@ -90,8 +90,8 @@ def main():
     p.add_argument("--baseline-throughput", type=float, default=None)
     p.add_argument("--baseline-pass1", type=float, default=None)
     p.add_argument("--size-scale", type=float, default=80.0)
-    p.add_argument("--label-offset-x", type=float, default=-8.0)
-    p.add_argument("--label-offset-y", type=float, default=1.0)
+    p.add_argument("--label-offset-x", type=float, default=+8.0)
+    p.add_argument("--label-offset-y", type=float, default=0.0)
     args = p.parse_args()
 
     df = load_data(args.csv)
@@ -113,16 +113,29 @@ def main():
     )
 
     # Labels near each point
+    color="black"
     for i, r in df_delta.iterrows():
         if "Jacobi Forcing" in df_delta.loc[i, "technique"]:
-            args.label_offset_x -= 30
+            label_offset_x = -38.0
+            label_offset_y = 1.0
+            color = "red"
+        elif "qwen-2.5-coder-7b-instruct" in df_delta.loc[i, "technique"]:
+            label_offset_x = -8.0
+            label_offset_y = 1.0
+        else:
+            label_offset_x = args.label_offset_x
+            label_offset_y = args.label_offset_y
         ax.annotate(
             df_delta.loc[i, "technique"],
             xy=(r["delta_throughput"], r["delta_pass1"]),
-            xytext=(r["delta_throughput"] + args.label_offset_x,
-                    r["delta_pass1"] + args.label_offset_y),
-            fontsize=16
+            xytext=(
+                r["delta_throughput"] + label_offset_x,
+                r["delta_pass1"] + label_offset_y
+            ),
+            fontsize=16,
+            color=color
         )
+
 
     # Axes lines (dashed) through zero
     ax.axhline(0, linewidth=1, linestyle="--")
@@ -156,15 +169,15 @@ def main():
             abs_tps = df_delta.loc[idx, "abs_throughput"]
             abs_acc = df_delta.loc[idx, "abs_pass1"]
 
-            ax.scatter(x_star, y_star, 
-                       s=320, 
-                       marker="*", 
-                       color="red",
-                       edgecolor="white", 
-                       linewidth=0.8, 
-                       zorder=6,
-                       alpha=0.5,
-            )
+            #ax.scatter(x_star, y_star, 
+            #           s=320, 
+            #           marker="*", 
+            #           color="red",
+            #           edgecolor="white", 
+            #           linewidth=0.8, 
+            #           zorder=6,
+            #           alpha=0.5,
+            #)
 
             ax.annotate(
                 f"{abs_tps:.1f} t/s, {abs_acc:.1f}%",

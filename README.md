@@ -8,7 +8,7 @@
      Badges + Links
      ========================= -->
 <p align="center">
-  <a href="http://arxiv.org/abs/XXXX.XXXXX">
+  <a href="http://arxiv.org/pdf/2512.14681">
     <img src="https://flat.badgen.net/badge/Paper/arXiv/red" alt="Paper">
   </a>
   <a href="https://hao-ai-lab.github.io/blogs/jacobi-forcing/">
@@ -27,7 +27,7 @@
 
 *Jacobi Forcing* is a new training technique that converts LLMs into native casual parallel decoders. Jacobi forcing keeps the casual AR backbone and fixes the AR-to-diffusion mismatch by training the model to handle noisy future blocks along its own Jacobi decoding trajectories. 
 
-*Jacobi Forcing* yields an AR model which behaves like a diffusion-style decoder—decoding multiple tokens per pass, but still from left to right—with up to $4.5\times$ higher tokens-per-forward and $4\times$ wall-clock speedup on coding and math tasks, while retraining near-AR generation quality. 
+*Jacobi Forcing* yields an AR model which behaves like a diffusion-style decoder—decoding multiple tokens per pass, but still from left to right—with up to $4.5\times$ higher tokens-per-forward and $4\times$ wall-clock speedup on coding and math tasks, while retaining near-AR generation quality. 
 
 <p align="center">
   <picture>
@@ -56,6 +56,12 @@
 
 AR decoding is high-quality but serial: one forward pass per token. Diffusion language models can decode many tokens in parallel, but typically require **non-causal objectives** and often **break KV-cache-friendly serving**.
 
+<p align="center">
+    <img src="assets/decoding_comparison.gif" width="90%" alt="decoding comparison" />
+  <br/>
+  <i>fig1: Side-by-side comparison between Jacobi forcing decoding and text diffusion decoding, where Jacobi forcing decoding comes with more efficient KV cache reuse and is trained to generate higher quality drafts over a long horizon.</i>
+</p>
+
 Jacobi Forcing bridges this gap by training an AR model to behave like a diffusion-style decoder while staying causal:
   - **Causal, left-to-right generation** with KV-cache reuse
   - Parallel token updates within a block of size $n$ (via Jacobi decoding) and training makes such convergence faster
@@ -64,7 +70,7 @@ Jacobi Forcing bridges this gap by training an AR model to behave like a diffusi
 <p align="center">
     <img src="assets/trajectory.jpeg" width="90%" alt="higher-quality draft" />
   <br/>
-  <i>fig1: Illustration of higher quality drafts that emerge from Jacobi Forcing model.</i>
+  <i>fig2: Illustration of higher quality drafts that emerge from Jacobi Forcing model.</i>
 </p>
 
 
@@ -122,16 +128,13 @@ git lfs clone https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_tra
 
 ##### Choice B
 
-- step 1: Collect Jacobi trajectories from a base AR model (intermediate states + fixed-point state for all $n-$token blocks).
+- step 1: Collect Jacobi trajectories from a base AR model (intermediate states + fixed-point state for all $n$-token blocks).
 
 ```
 # generate trajctories using customized models
 bash generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh
 ```
 
-If the target model is not Qwen2.5, first modify `generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh` to customize model path, trajectory data destimation, and input data path (you can download our length-bucketed input data from [this link for code](https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_length_sorted) and [this link for math](https://huggingface.co/datasets/JacobiForcing/OpenThought2_length_bucketed)).
-
-Then adapt from the script `generate_trajectory/generation/qwen2_modeling_jacobi_forcing_greedy.py` to make your target model compatible.
 
 - step 2: training sequence packing and mapping noise schedule to training sequence.
 
@@ -146,12 +149,17 @@ python3 generate_trajectory/data/2_prepare_efficient_cllm_training_data_progress
     --strategy "progressive"
 ```
 
+**Note**: if the target model is not Qwen2.5, first modify `generate_trajectory/generation/generate_trajectory_opencodeinstruct_greedy.sh` to customize model path, trajectory data destimation, and input data path (you can download our length-bucketed input data from [this link for code](https://huggingface.co/datasets/JacobiForcing/OpenCodeInstruct_length_sorted) and [this link for math](https://huggingface.co/datasets/JacobiForcing/OpenThought2_length_bucketed)). 
+
+Then adapt from the script `generate_trajectory/generation/qwen2_modeling_jacobi_forcing_greedy.py` to make your target model compatible.
+
+
 <p align="center">
   <picture>
     <img src="assets/noise_schedule_and_sequence_packing.gif" width="60%" alt="noise schedule mapping" />
   </picture>
   <br/>
-  <i>fig2: Illustration of the training sequence packing process with an example (linear progressive) noise schedule mapping.</i>
+  <i>fig3: Illustration of the training sequence packing process with an example (linear progressive) noise schedule mapping.</i>
 </p>
 
 
@@ -165,7 +173,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 <p align="center">
     <img src="assets/noisy_context_attention_mask.jpeg" width="50%" alt="noise context training" />
   <br/>
-  <i>fig3: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
+  <i>fig4: Jacobi Forcing uses the attention implementation shown above. It allows logits from clean blocks and noisy blocks to be generated with single forward pass to calculate the progressive consistency loss and AR loss.</i>
 </p>
 
 ### Inference
@@ -187,7 +195,7 @@ Jacobi Forcing decoding typically exposes knobs like:
     <img src="assets/multiblock_rejection_recycling.gif" width="90%" alt="MR decoding" />
   </picture>
   <br/>
-  <i>fig4: Illustration of multiblock Jacobi decoding with rejection recycling. High-quality n-grams from earlier iterations are reused as drafts.</i>
+  <i>fig5: Illustration of multiblock Jacobi decoding with rejection recycling. High-quality n-grams from earlier iterations are reused as drafts.</i>
 </p>
 
 Recommended starting point (from our grid search):
@@ -267,11 +275,13 @@ On a single B200 GPU with much higher FLOPs, the same Jacobi Forcing model with 
 This is the official project repository for the following paper. If you find this repository helpful, Please kindly cite:
 
 ```
-@article{hu2025jacobi-forcing,
-    title = {Fast and Accurate Causal Parallel Decoding using Jacobi Forcing},
-    author = {Hu, Lanxiang and Kou, Siqi and Fu, Yichao and Rajbhandari, Samyam and Rosing, Tajana and He, Yuxiong and Deng, Zhijie and Zhang, Hao},
-    year = {2025},
-    archivePrefix= {arXiv},
-    primaryClass = {cs.CL},
+@misc{hu2025fastaccuratecausalparallel,
+      title={Fast and Accurate Causal Parallel Decoding using Jacobi Forcing}, 
+      author={Lanxiang Hu and Siqi Kou and Yichao Fu and Samyam Rajbhandari and Tajana Rosing and Yuxiong He and Zhijie Deng and Hao Zhang},
+      year={2025},
+      eprint={2512.14681},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2512.14681}, 
 }
 ```

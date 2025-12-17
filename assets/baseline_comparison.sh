@@ -1,3 +1,3 @@
-python3 paper/baseline_comparison.py \
-    --csv paper/baselines.csv \
-    --out paper/baselines_comparison.png
+python3 assets/baseline_comparison.py \
+    --csv assets/baselines.csv \
+    --out assets/baselines_comparison.png
