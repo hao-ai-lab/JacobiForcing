@@ -39,6 +39,12 @@
   <i>Demo of on average more than 4x speedup (181.8 TPS vs. 39.81 TPS) by Jacobi Forcing Model in comparison with the AR baseline (Qwen2.5-Coder-7B-Instruct) on coding sessions.</i>
 </p>
 
+Try the chatbot yourself with:
+```
+# modify the script to use your local path
+streamlit run applications/jacobi_model_chat.py
+```
+
 
 ## Contents
 - [Introduction](#introduction)
