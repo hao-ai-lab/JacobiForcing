@@ -25,7 +25,8 @@
 
 ##
 
-*Jacobi Forcing* is a new training technique that converts LLMs into native casual parallel decoders. Jacobi forcing keeps the casual AR backbone and fixes the AR-to-diffusion mismatch by training the model to handle noisy future blocks along its own Jacobi decoding trajectories. 
+*Jacobi Forcing* is a new training technique that converts LLMs into native causal parallel decoders. Jacobi forcing keeps the causal
+AR backbone and fixes the AR-to-diffusion mismatch by training the model to handle noisy future blocks along its own Jacobi decoding trajectories. 
 
 *Jacobi Forcing* yields an AR model which behaves like a diffusion-style decoder—decoding multiple tokens per pass, but still from left to right—with up to $4.5\times$ higher tokens-per-forward and $4\times$ wall-clock speedup on coding and math tasks, while retaining near-AR generation quality. 
 
