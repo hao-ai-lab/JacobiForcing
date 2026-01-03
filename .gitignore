@@ -1,5 +1,5 @@
 data/collected_diffusion_trajectory/*
-*/__pycache__
+*/__pycache__/
 cllm2
 cllm2_venv
 wandb
