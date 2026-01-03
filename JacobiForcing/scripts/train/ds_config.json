@@ -3,12 +3,11 @@
   "zero_optimization": {
     "stage": 3,
     "allgather_partitions": true,
-    "overlap_comm": false,
+    "overlap_comm": true,
     "reduce_scatter": true,
-    "contiguous_gradients": true,
-    "stage3_param_persistence_threshold": 0
+    "contiguous_gradients": true
   },
   "gradient_accumulation_steps": 1,
-  "train_micro_batch_size_per_gpu": 1,
+  "train_micro_batch_size_per_gpu": 32,
   "wall_clock_breakdown": false
 }
