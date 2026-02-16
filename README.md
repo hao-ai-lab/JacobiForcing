@@ -261,6 +261,7 @@ We evaluate baseline models' and Jacobi Forcing models' performance on HumanEval
 
 #### Performance Summary
 
+
 Overall, Jacobi Forcing model consistently delivers **up to $3-4\times$ wall-clock speedup** on coding and math tasks with only minor accuracy changes versus greedy AR, while significantly outperforming both dLLMs and prior consistency-based parallel decoders in the accuracy–throughput tradeoff.
 
 
@@ -268,9 +269,9 @@ On a single B200 GPU with much higher FLOPs, the same Jacobi Forcing model with 
 
 
 | Method        | Attention      | Parallelism                      | Training Cost | Single-model Decoding (no draft–verifier)   | Efficient KV Reuse        | Real Speedup | Generation Quality         |
-|----------------------|------------------------|-----------------------------------------------|------------------------------------|-------------------------------------------|----------------------|-------------------------------|---------------------------|
-| **AR**        | Causal | None                          | None                                            | No   |  Yes               |No            | Lossless            |
-| **SD** | Causal                 | Yes             | No to Small: Draft model FT        | $\textcolor{red}{\text{No}}$ | Yes     | $<3.5\times$ | Lossless            | 
+|----------------------|------------------------|-----------------------------------------------|------------------------------------|-------------------------------------------|----------------------|---------------------------------|---------------------------|
+| **AR**        | Causal | None   |   None             |    No       |  Yes               |       No      |   Lossless            |
+| **SD** | Causal                 |   Yes             | No to Small: Draft model FT        | $\textcolor{red}{\text{No}}$ | Yes     | $<3.5\times$ | Lossless            | 
 | **dLLMs**            | Non-causal    | Yes   | High: from scratch or heavy diffusion FT      | Yes | $\textcolor{red}{\text{No}}$ | $< 3\times$ | Low to near-AR quality |
 | **Jacobi Forcing**   | Causal                 | Yes   | Small: noise-conditioned FT on trajectories | $\textcolor{green}{\text{Yes}}$ |  $\textcolor{green}{\text{Yes}}$   |  $\sim3-4\times$    | near-AR quality   |
 

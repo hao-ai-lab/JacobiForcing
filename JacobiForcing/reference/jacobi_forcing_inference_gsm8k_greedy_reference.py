@@ -14,8 +14,6 @@ import os
 
 import pandas as pd
 
-import re
-
 from pathlib import Path
 import sys
 path_root = Path(__file__).parents[1]
@@ -27,16 +25,24 @@ Qwen2ForCausalLM.jacobi_forward_greedy_multiblock = jacobi_forward_greedy_multib
 # ---------------------------
 # Load dataset (first 100)
 # ---------------------------
-df = pd.read_parquet("/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
+df = pd.read_json("./eval/gsm8k_test_with_gt.jsonl", lines=True)
 df_size = len(df)
-print(f"Loaded HumanEval dataset with {df_size} samples")
+print(f"Loaded GSM8k dataset with {df_size} samples")
 records = df.to_dict(orient="records")
 
 # ---------------------------
 # Load model/tokenizer once
 # ---------------------------
-model_name = "/raid/lah003/ckpts/shiftedattn-10-16-7b-qwen2p5-coder-n32w16-n16distill-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-344092"
-#model_name = "/raid/lah003/ckpts/rl/e2e_test_20260113_230625/checkpoints/iteration_21/hf_checkpoint"
+#model_name = "/home/lah003/models/shiftedattn-9-3-coder-7B-ntok16_soft_ce_oci_datav1_59k_stp_ar_10_cyclic_prog_noise_all_lr1e-6"
+#model_name = "/home/lah003/models/yc-blk32-10k"
+
+#model_name = "/home/lah003/models/progressive_noise_cllm2_mask_1m_steps"
+#model_name = "/home/lah003/models/0915_w16_blk32_cllm_progressive_21k"
+#model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n16-distill-n32w16-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-212000"
+#model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n16-distill-n32w16-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-344092"
+#model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n16w16-distilln64w32-ar-1-cyclic-noise-all-1e-6"
+#model_name = "/home/lah003/models/shiftedattn-10-23-7b-qwen2p5-coder-n16w16-distilln32w16-ar-1-cyclic-noise-all-1e-6/ckpt_218000"
+model_name = "/data/phd/kousiqi/kousiqi/ckpts/1030-arcon_1_1_math-n64w32-1e-6-bsz4/checkpoint-57529"
 
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
@@ -44,7 +50,7 @@ model = Qwen2ForCausalLM.from_pretrained(
     torch_dtype=torch.bfloat16,
     attn_implementation="flash_attention_2"
 )
-tokenizer = AutoTokenizer.from_pretrained("/raid/lah003/models/Qwen2.5-Coder-7B-Instruct")
+tokenizer = AutoTokenizer.from_pretrained("/data/phd/kousiqi/kousiqi/ckpts/1030-arcon_1_1_math-n64w32-1e-5-bsz4/checkpoint-57529")
 model.eval()
 
 
@@ -74,58 +80,21 @@ all_generations = []
 
 total_gen_only_time = 0
 
-for idx, row in tqdm(enumerate(records)):
+for idx, row in tqdm(enumerate(records[:100])):
     task_id = row.get("task_id", f"idx_{idx}")
-#    prompt = "You are given a partially completed Python function with the header and the doc string. Complete the following function according to given information:\n\n" + row["prompt"]
-
-#    prompt = """
-#Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
-#```python
-#{}
-#```
-#""".strip().format(
-#            row["prompt"].strip()
-#    )
-
-# currently best performing scheme (best acc + best speed) for distilled ckpt:
-#    prompt = """Please continue to complete the function. You are not allowed to modify the given code and please do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
-#{}
-#""".strip().format(
-#            row["prompt"].strip()
-#    )
-
-#    prompt = """You are given an incomplete Python code. You are not allowed to modify the given code and please do the completion only. Please return all completed function in a codeblock.
-#
-#**Function Header and Doc String:**
-#```
-#{}
-#```
-#""".strip().format(
-#            row["prompt"].strip()
-#    )
-
-# currently best performing scheme (best acc + best speed) for trained from original with distilled data ckpt:
-    prompt = """Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
-```
-{}
-```
-""".strip().format(
-            row["prompt"].strip()
-    )
-
-#    pattern = r'"""(.*?)"""'
-#    docstring = re.search(pattern, row["prompt"], re.DOTALL)
-#    if not docstring:
-#        print(f"WARNING!!! NO DOCSTRING FOUND FOR ENTRY: {idx}")
-    
-#    prompt = """
-#Complete the Python function starting with the following header with docstring. Do not add explaination.
-#{}
-#""".strip().format(
-#            row["prompt"].strip()
-#    )
-
-#    prompt = "Respond only in code.\n" + row["prompt"]
+    #prompt = "You are given a partially completed Python function with the header and the doc string. Complete the following function according to given information:\n\n" + row["prompt"]
+#     prompt = """
+# Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
+# ```python
+# {}
+# ```
+# """.strip().format(
+#             row["prompt"].strip()
+#     )
+    # prompt = row["question"]
+    PROMPT = """Problem: {problem}\nMark your solution with \\boxed\nAnswer:"""
+    prompt = PROMPT.format(problem=row["question"])
+    #prompt = "Respond only in code.\n" + row["prompt"]
 
     messages = [{"role": "user", "content": prompt}]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -301,26 +270,29 @@ def extract_python_code(text):
     else:
         return text  # Return orginal one if no match is found
 
-eval_dir = "/home/lah003/data/CLLM2_eval_generations/rl_results"
-os.makedirs(eval_dir, exist_ok=True)
+# eval_dir = "./CLLM2_eval_generations/multiblock_profiling"
+# os.makedirs(eval_dir, exist_ok=True)
 
-original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
-original_generations = load_jsonl(original_path)
+# original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
+# original_generations = load_jsonl(original_path)
 
-# Process each generation and update with processed generation
-for i, original_generation in enumerate(original_generations):
-    # Assuming `all_generations[i]` exists and has an 'extracted' key or method
-    original_generation['output'] = all_generations[i]
-    processed_generation = extract_python_code(all_generations[i])  # Apply the extract method
-    print(f'Task id: {i}, Extracted answer: {processed_generation}')
-    original_generation['generation'] = processed_generation
+# # Process each generation and update with processed generation
+# for i, original_generation in enumerate(original_generations):
+#     # Assuming `all_generations[i]` exists and has an 'extracted' key or method
+#     original_generation['output'] = all_generations[i]
+#     processed_generation = extract_python_code(all_generations[i])  # Apply the extract method
+#     print(f'Task id: {i}, Extracted answer: {processed_generation}')
+#     original_generation['generation'] = processed_generation
 
 # Save processed generations
-save_path = os.path.join(eval_dir, f'fastest_prompt_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_humaneval_{model_name.split("/")[-1]}.jsonl')
+#save_path = os.path.join(eval_dir, f'sep_n16w16_distilln32_400kdata_multiblock_lookahead_k2_r0p8_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+#save_path = os.path.join(eval_dir, f'oct_n16w16_distilln32w32_344kstps_multiblock_lookahead_k2_r0p8_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+#save_path = os.path.join(eval_dir, f'oct_n16w16_distilln32w16_ckpt218000_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+# save_path = os.path.join(eval_dir, f'oct_n16w16_distilln64w32_ckpt229000_multiblock_lookahead_k2_r0p85_ntok64_lkahead0p0_ngp4_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
 
-save_jsonl(original_generations, save_path)
+# save_jsonl(original_generations, save_path)
 
-print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")
+# print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")
 
 #### ADDED Lines ####
 

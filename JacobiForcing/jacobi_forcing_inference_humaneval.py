@@ -19,7 +19,7 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved_continuous_drafting import jacobi_forward_greedy
+from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved import jacobi_forward_greedy
 Qwen2ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
 
 # Load dataset
@@ -31,7 +31,10 @@ records = df.to_dict(orient="records")
 # ---------------------------
 # Load model/tokenizer once
 # ---------------------------
-model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n16-distill-n32w16-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-212000"
+#model_name = "/raid/lah003/ckpts/shiftedattn-10-16-7b-qwen2p5-coder-n32w16-n16distill-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-344092"
+#model_name = "/home/lah003/workspace/inference_engines/Decode-Learning/tmp/e2e_test_20260116_190021/checkpoints/iteration_15/hf_checkpoint"
+
+model_name = "/raid/lah003/ckpts/JacobiForcing_Coder_7B_v1"
 
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
@@ -67,14 +70,22 @@ total_gen_only_time = 0
 for idx, row in tqdm(enumerate(records)):
     task_id = row.get("task_id", f"idx_{idx}")
     #prompt = "You are given a partially completed Python function with the header and the doc string. Complete the following function according to given information:\n\n" + row["prompt"]
-    prompt = """
-Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
-```python
+#    prompt = """
+#Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
+#```python
+#{}
+#```
+#""".strip().format(
+#            row["prompt"].strip()
+#        )
+    
+    prompt = """Please continue to complete the function. You are not allowed to modify the given code and do the completion only. Please return all completed function in a codeblock. Here is the given code to do completion:
+```
 {}
 ```
 """.strip().format(
             row["prompt"].strip()
-        )
+    )
 
     messages = [{"role": "user", "content": prompt}]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -240,13 +251,17 @@ def save_jsonl(data, save_path):
 
 # Function to extract Python code block from a string
 def extract_python_code(text):
-    match = re.search(r'```python([\s\S]*?)```', text)  # Regex to match the block
-    if match:
-        return match.group(1).strip()  # Return the code inside the block
+    """Extract the LAST Python code block from text.
+    
+    If multiple code blocks exist, returns the last one.
+    """
+    matches = re.findall(r'```python([\s\S]*?)```', text)  # Find all matches
+    if matches:
+        return matches[-1].strip()  # Return the LAST code block
     else:
-        return text  # Return orginal one if no match is found
+        return text  # Return original one if no match is found
 
-eval_dir = "/home/lah003/data/CLLM2_eval_generations/baselines"
+eval_dir = "/home/lah003/data/CLLM2_eval_generations/rl_results"
 os.makedirs(eval_dir, exist_ok=True)
 
 original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
@@ -261,7 +276,8 @@ for i, original_generation in enumerate(original_generations):
     original_generation['generation'] = processed_generation
 
 # Save processed generations
-save_path = os.path.join(eval_dir, f'oct_n16w16_distilln32w16_212kstps_greedy_code_only_prompt_humaneval_w_kv_generation_{model_name.split("/")[-1]}.jsonl')
+save_path = os.path.join(eval_dir, f'fastest_prompt_greedy_jacobi_ntok64_humaneval_{model_name.split("/")[-1]}.jsonl')
+
 save_jsonl(original_generations, save_path)
 
 print(f"\n=== All generation done (HumanEval). Results are saved to {save_path} ===")
