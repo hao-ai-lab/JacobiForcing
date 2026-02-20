@@ -20,7 +20,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0">
     <img src="https://flat.badgen.net/badge/License/Apache--2.0/blue" alt="License">
   </a>
-  <a href="https://hyperai/notebooks/49266">
+  <a href="https://hyper.ai/notebooks/49266">
     <img src="https://flat.badgen.net/badge/Tutorial/Quickstart/green" alt="Tutorial">
 </p>
 
