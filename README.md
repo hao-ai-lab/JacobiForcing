@@ -189,7 +189,7 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 
 #### Inference Engine
 
-A lightweight, self-contained inference engine lives in `inference_engine/`. It supports autoregressive and Jacobi decoding (greedy & non-greedy) with FlashAttention, paged KV cache, CUDA graph capture, and tensor parallelism implmetend on top of [nano-vLLM](GeeeekExplorer/nano-vllm). On a single GPU the engine reaches **800–1000 tokens/second** with Jacobi Forcing models.
+A lightweight, self-contained inference engine lives in `inference_engine/`. It supports autoregressive and Jacobi decoding (greedy & non-greedy) with FlashAttention, paged KV cache, CUDA graph capture, and tensor parallelism implmetend on top of [nano-vLLM](https://github.com/GeeeekExplorer/nano-vllm). On a single GPU the engine reaches **800–1000 tokens/second** with Jacobi Forcing models.
 
 ```bash
 # greedy Jacobi correctness test
