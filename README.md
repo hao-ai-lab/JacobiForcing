@@ -20,6 +20,8 @@
   <a href="https://opensource.org/licenses/Apache-2.0">
     <img src="https://flat.badgen.net/badge/License/Apache--2.0/blue" alt="License">
   </a>
+  <a href="https://hyperai/notebooks/49266">
+    <img src="https://flat.badgen.net/badge/Tutorial/Quickstart/green" alt="Tutorial">
 </p>
 
 
@@ -184,6 +186,18 @@ bash scripts/train/train_jacobi_forcing_coder_n32.sh
 </p>
 
 ### Inference
+
+#### Inference Engine
+
+A lightweight, self-contained inference engine lives in `inference_engine/`. It supports autoregressive and Jacobi decoding (greedy & non-greedy) with FlashAttention, paged KV cache, CUDA graph capture, and tensor parallelism implmetend on top of [nano-vLLM](GeeeekExplorer/nano-vllm). On a single GPU the engine reaches **800–1000 tokens/second** with Jacobi Forcing models.
+
+```bash
+# greedy Jacobi correctness test
+python inference_engine/tests/test_jacobi_decoding_greedy.py --model-path /path/to/model
+
+# non-greedy distribution similarity test
+python inference_engine/tests/test_jacobi_decoding_nongreedy.py --model-path /path/to/model
+```
 
 #### Multiblock Decoding
 
