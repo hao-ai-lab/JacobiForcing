@@ -19,19 +19,19 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved_continuous_drafting import jacobi_forward_greedy
+from modeling.cllm2_qwen2_modeling_kv_terminate_on_eos_improved import jacobi_forward_greedy
 Qwen2ForCausalLM.jacobi_forward_greedy = jacobi_forward_greedy
 
 # Load dataset
-df = pd.read_parquet("/home/lah003/data/openai_humaneval/openai_humaneval/test-00000-of-00001.parquet")
-df_size = len(df)
+hf_dataset = load_dataset("openai/openai_humaneval", split="test")
+records = [dict(row) for row in hf_dataset]
+df_size = len(records)
 print(f"Loaded HumanEval dataset with {df_size} samples")
-records = df.to_dict(orient="records")
 
 # ---------------------------
 # Load model/tokenizer once
 # ---------------------------
-model_name = "/home/lah003/models/shiftedattn-10-16-7b-qwen2p5-coder-n16-distill-n32w16-data-v2-ar-1-cyclic-noise-all-1e-6/ckpt-212000"
+model_name = "JacobiForcing/JacobiForcing_Coder_7B_v1"
 
 model = Qwen2ForCausalLM.from_pretrained(
     model_name,
@@ -246,11 +246,10 @@ def extract_python_code(text):
     else:
         return text  # Return orginal one if no match is found
 
-eval_dir = "/home/lah003/data/CLLM2_eval_generations/baselines"
+eval_dir = "eval_generations"
 os.makedirs(eval_dir, exist_ok=True)
 
-original_path = os.path.join(eval_dir, 'humaneval_python_example.jsonl')
-original_generations = load_jsonl(original_path)
+original_generations = [{"task_id": r["task_id"], "prompt": r["prompt"]} for r in records]
 
 # Process each generation and update with processed generation
 for i, original_generation in enumerate(original_generations):
