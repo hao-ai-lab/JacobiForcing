@@ -37,7 +37,7 @@ model = Qwen2ForCausalLM.from_pretrained(
     model_name,
     device_map="cuda",
     torch_dtype=torch.bfloat16,
-    # attn_implementation="flash_attention_2"
+    attn_implementation="flash_attention_2"
 )
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct")
 model.eval()
